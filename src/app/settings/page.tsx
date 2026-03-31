@@ -1,0 +1,224 @@
+'use client';
+
+import { useEffect, useState, useCallback } from 'react';
+import { useAuth } from '@/hooks/useAuth';
+import { createClient } from '@/lib/supabase';
+import { Profile } from '@/types';
+import { useRouter } from 'next/navigation';
+
+export default function SettingsPage() {
+  const { profile, signOut } = useAuth();
+  const supabase = createClient();
+  const router = useRouter();
+
+  const [members, setMembers]   = useState<Profile[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [modal, setModal]       = useState<'add' | 'edit' | null>(null);
+  const [selected, setSelected] = useState<Profile | null>(null);
+  const [saving, setSaving]     = useState(false);
+  const [form, setForm]         = useState({ display_name: '', email: '', password: '', role: 'member' as 'admin' | 'member' });
+  const [error, setError]       = useState('');
+
+  const load = useCallback(async () => {
+    if (!profile?.family_id) return;
+    setLoading(true);
+    const { data } = await supabase.from('profiles').select('*').eq('family_id', profile.family_id).order('created_at');
+    setMembers((data ?? []) as Profile[]);
+    setLoading(false);
+  }, [profile?.family_id, supabase]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const openAdd = () => {
+    setForm({ display_name: '', email: '', password: '', role: 'member' });
+    setError('');
+    setModal('add');
+    setSelected(null);
+  };
+
+  const openEdit = (m: Profile) => {
+    setForm({ display_name: m.display_name, email: '', password: '', role: m.role });
+    setSelected(m);
+    setError('');
+    setModal('edit');
+  };
+
+  const closeModal = () => { setModal(null); setSelected(null); setSaving(false); setError(''); };
+
+  const handleAddMember = async () => {
+    if (!profile?.family_id) return;
+    setSaving(true);
+    setError('');
+
+    // 用 Supabase Admin API 建立用戶（需要 service role key，透過 Next.js API route）
+    const res = await fetch('/api/admin/create-member', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: form.email,
+        password: form.password,
+        display_name: form.display_name,
+        role: form.role,
+        family_id: profile.family_id,
+      }),
+    });
+
+    const result = await res.json();
+    if (!res.ok) {
+      setError(result.error ?? '建立失敗，請再試一次');
+    } else {
+      closeModal();
+      load();
+    }
+    setSaving(false);
+  };
+
+  const handleEditMember = async () => {
+    if (!selected) return;
+    setSaving(true);
+    await supabase.from('profiles').update({
+      display_name: form.display_name,
+      role: form.role,
+    }).eq('id', selected.id);
+
+    if (form.password) {
+      await fetch('/api/admin/update-member', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: selected.id, password: form.password }),
+      });
+    }
+    closeModal();
+    load();
+  };
+
+  const handleDeleteMember = async (m: Profile) => {
+    if (m.id === profile?.id) return;
+    if (!confirm(`確定要刪除成員「${m.display_name}」嗎？`)) return;
+    await fetch('/api/admin/delete-member', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: m.id }),
+    });
+    load();
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    router.replace('/');
+  };
+
+  return (
+    <div className="page-container">
+      <div className="page-header">
+        <h1 className="page-title">⚙️ 設定</h1>
+        <p className="page-subtitle">帳號與家庭管理</p>
+      </div>
+
+      {/* My Profile */}
+      <div className="card" style={{ marginBottom: 'var(--space-6)' }}>
+        <h2 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 'var(--space-4)' }}>我的帳號</h2>
+        <div className="flex items-center gap-4">
+          <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'linear-gradient(135deg,var(--lake-safe),var(--pond-a))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.3rem', fontWeight: 700, color: 'white', flexShrink: 0 }}>
+            {profile?.display_name?.[0]}
+          </div>
+          <div style={{ flex: 1 }}>
+            <div className="font-semibold">{profile?.display_name}</div>
+            <div className="text-sm text-secondary">
+              {profile?.role === 'admin' ? '🛡️ 湖泊管理員' : '👤 家庭成員'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Family Members (Admin Only) */}
+      {profile?.role === 'admin' && (
+        <div className="card" style={{ marginBottom: 'var(--space-6)' }}>
+          <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-5)' }}>
+            <h2 style={{ fontSize: '1rem', fontWeight: 700 }}>👥 家庭成員管理</h2>
+            <button className="btn btn-primary btn-sm" onClick={openAdd} id="settings-add-member-btn">+ 新增成員</button>
+          </div>
+
+          {loading ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              {[1,2].map(i => <div key={i} className="skeleton" style={{ height: 56 }} />)}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              {members.map(m => (
+                <div key={m.id} className="flex items-center justify-between gap-4" style={{ padding: 'var(--space-3) 0', borderBottom: '1px solid var(--color-border-light)' }}>
+                  <div className="flex items-center gap-3">
+                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg,var(--lake-safe),var(--pond-a))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem', fontWeight: 700, color: 'white', flexShrink: 0 }}>
+                      {m.display_name[0]}
+                    </div>
+                    <div>
+                      <div className="font-medium text-sm">
+                        {m.display_name}
+                        {m.id === profile.id && <span className="badge badge-info" style={{ marginLeft: 8, fontSize: '0.65rem' }}>我</span>}
+                      </div>
+                      <div className="text-xs text-muted">{m.role === 'admin' ? '管理員' : '成員'}</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button className="btn btn-ghost btn-sm" onClick={() => openEdit(m)} id={`settings-edit-${m.id}`}>編輯</button>
+                    {m.id !== profile.id && (
+                      <button className="btn btn-danger btn-sm" onClick={() => handleDeleteMember(m)} id={`settings-delete-${m.id}`}>刪除</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Danger Zone */}
+      <div className="card" style={{ borderColor: 'rgba(224,82,82,0.2)' }}>
+        <h2 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 'var(--space-4)', color: 'var(--status-error)' }}>登出</h2>
+        <button className="btn btn-danger" onClick={handleSignOut} id="settings-logout-btn">登出帳號</button>
+      </div>
+
+      {/* Add/Edit Member Modal */}
+      {modal && (
+        <div className="modal-overlay" onClick={closeModal}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">{modal === 'add' ? '新增家庭成員' : '編輯成員'}</h3>
+              <button className="btn btn-ghost btn-sm" onClick={closeModal} id="settings-modal-close">✕</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+              <div className="form-group">
+                <label className="form-label">顯示名稱</label>
+                <input id="settings-form-name" type="text" className="form-input" placeholder="例：爸爸、媽媽" value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} />
+              </div>
+              {modal === 'add' && (
+                <div className="form-group">
+                  <label className="form-label">電子郵件</label>
+                  <input id="settings-form-email" type="email" className="form-input" placeholder="登入用的 Email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+                </div>
+              )}
+              <div className="form-group">
+                <label className="form-label">{modal === 'add' ? '密碼' : '新密碼（留空不更改）'}</label>
+                <input id="settings-form-password" type="password" className="form-input" placeholder={modal === 'add' ? '設定登入密碼' : '（留空不更改）'} value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">角色</label>
+                <select id="settings-form-role" className="form-input form-select" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as 'admin' | 'member' }))}>
+                  <option value="member">家庭成員</option>
+                  <option value="admin">湖泊管理員</option>
+                </select>
+              </div>
+              {error && <div className="alert alert-error"><span>⚠️</span> {error}</div>}
+              <div className="flex gap-3" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
+                <button className="btn btn-ghost" onClick={closeModal} id="settings-modal-cancel">取消</button>
+                <button className="btn btn-primary" onClick={modal === 'add' ? handleAddMember : handleEditMember} disabled={saving || !form.display_name} id="settings-modal-save">
+                  {saving ? '儲存中...' : '儲存'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
