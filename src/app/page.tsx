@@ -2,9 +2,17 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth, AuthProvider } from '@/hooks/useAuth';
 
-export default function LoginPage() {
+export default function Page() {
+  return (
+    <AuthProvider>
+      <LoginPage />
+    </AuthProvider>
+  );
+}
+
+function LoginPage() {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [error, setError]       = useState('');
