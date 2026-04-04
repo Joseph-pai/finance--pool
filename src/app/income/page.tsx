@@ -23,7 +23,7 @@ export default function IncomePage() {
   const [members, setMembers]     = useState<Profile[]>([]);
 
   // Form state
-  const [form, setForm] = useState({ name: '', expected_date: '', amount: '' });
+  const [form, setForm] = useState({ name: '', expected_date: '', amount: '', user_id: '' });
   const [transferAmount, setTransferAmount] = useState('');
   const [confirmActual, setConfirmActual] = useState('');
 
@@ -42,13 +42,13 @@ export default function IncomePage() {
   useEffect(() => { load(); }, [load]);
 
   const openAdd = () => {
-    setForm({ name: '', expected_date: format(new Date(), 'yyyy-MM-dd'), amount: '' });
+    setForm({ name: '', expected_date: format(new Date(), 'yyyy-MM-dd'), amount: '', user_id: profile?.id || '' });
     setModal('add');
     setSelected(null);
   };
 
   const openEdit = (item: IncomeItem) => {
-    setForm({ name: item.name, expected_date: item.expected_date, amount: String(item.amount) });
+    setForm({ name: item.name, expected_date: item.expected_date, amount: String(item.amount), user_id: item.user_id });
     setSelected(item);
     setModal('edit');
   };
@@ -64,12 +64,13 @@ export default function IncomePage() {
   const handleSave = async () => {
     if (!profile?.family_id) return;
     setSaving(true);
-    const data = { name: form.name, expected_date: form.expected_date, amount: Number(form.amount), family_id: profile.family_id, user_id: profile.id };
+    const targetUserId = form.user_id || profile.id;
+    const data = { name: form.name, expected_date: form.expected_date, amount: Number(form.amount), family_id: profile.family_id, user_id: targetUserId };
 
     if (modal === 'add') {
       await supabase.from('income_items').insert(data);
     } else if (modal === 'edit' && selected) {
-      await supabase.from('income_items').update({ name: form.name, expected_date: form.expected_date, amount: Number(form.amount) }).eq('id', selected.id);
+      await supabase.from('income_items').update({ name: form.name, expected_date: form.expected_date, amount: Number(form.amount), user_id: targetUserId }).eq('id', selected.id);
     }
     closeModal();
     load();
@@ -89,13 +90,14 @@ export default function IncomePage() {
       }).eq('id', selected.id);
 
       // 更新 pond_a 餘額
-      const { data: pondA } = await supabase.from('pond_a').select('current_balance').eq('user_id', profile.id).single();
+      const targetUserId = selected.user_id;
+      const { data: pondA } = await supabase.from('pond_a').select('current_balance').eq('user_id', targetUserId).single();
       const newBalance = (pondA?.current_balance ?? 0) + actualAmount;
-      await supabase.from('pond_a').upsert({ user_id: profile.id, family_id: profile.family_id, current_balance: newBalance }, { onConflict: 'user_id' });
+      await supabase.from('pond_a').upsert({ user_id: targetUserId, family_id: profile.family_id, current_balance: newBalance }, { onConflict: 'user_id' });
 
       // 記錄交易
       await supabase.from('transactions').insert({
-        family_id: profile.family_id, user_id: profile.id,
+        family_id: profile.family_id, user_id: targetUserId,
         type: 'income', amount: actualAmount,
         destination: 'pond_a', reference_id: selected.id,
         note: selected.name, transaction_date: new Date().toISOString().substring(0, 10),
@@ -113,10 +115,11 @@ export default function IncomePage() {
     if (!amt || !profile) return;
     setSaving(true);
 
+    const targetUserId = item.user_id;
     // 扣減 pond_a
-    const { data: pondA } = await supabase.from('pond_a').select('current_balance').eq('user_id', profile.id).single();
+    const { data: pondA } = await supabase.from('pond_a').select('current_balance').eq('user_id', targetUserId).single();
     const newPondA = Math.max(0, (pondA?.current_balance ?? 0) - amt);
-    await supabase.from('pond_a').update({ current_balance: newPondA }).eq('user_id', profile.id);
+    await supabase.from('pond_a').update({ current_balance: newPondA }).eq('user_id', targetUserId);
 
     // 增加 lake
     const { data: lake } = await supabase.from('lake').select('current_balance, id').eq('family_id', profile.family_id).single();
@@ -125,7 +128,7 @@ export default function IncomePage() {
 
     // 記錄交易
     await supabase.from('transactions').insert({
-      family_id: profile.family_id, user_id: profile.id,
+      family_id: profile.family_id, user_id: targetUserId,
       type: 'transfer_to_lake', amount: amt,
       source: 'pond_a', destination: 'lake',
       note: `注入湖泊：${item.name}`,
@@ -206,6 +209,7 @@ export default function IncomePage() {
           {filtered.map((item) => {
             const isOverdue = item.status === 'pending' && isAfter(new Date(), parseISO(item.expected_date));
             const isMe = item.user_id === profile?.id;
+            const canEdit = isMe || profile?.role === 'admin';
             const sl = statusLabel[item.status];
 
             return (
@@ -232,7 +236,7 @@ export default function IncomePage() {
                     <span className="amount-display amount-small amount-pond-a">{formatTWD(item.amount)}</span>
 
                     {/* Actions — only for own items */}
-                    {isMe && (
+                    {canEdit && (
                       <>
                         {item.status === 'pending' && (
                           <button className="btn btn-success btn-sm" onClick={() => openConfirm(item)} id={`income-confirm-${item.id}`}>
@@ -276,6 +280,14 @@ export default function IncomePage() {
               <button className="btn btn-ghost btn-sm" onClick={closeModal} id="income-modal-close">✕</button>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+              {profile?.role === 'admin' && (
+                <div className="form-group">
+                  <label className="form-label">所屬成員</label>
+                  <select id="income-form-user" className="form-input form-select" value={form.user_id} onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))}>
+                    {members.map(m => <option key={m.id} value={m.id}>{m.display_name}</option>)}
+                  </select>
+                </div>
+              )}
               <div className="form-group">
                 <label className="form-label">收入名稱</label>
                 <input id="income-form-name" type="text" className="form-input" placeholder="例：薪資、獎金" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
