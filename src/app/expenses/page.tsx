@@ -217,7 +217,7 @@ export default function ExpensesPage() {
 
                   <div className="flex items-center gap-3">
                     <span className="amount-display amount-small amount-negative">-{formatTWD(item.amount)}</span>
-                    {isMe && item.status !== 'completed' && (
+                    {isMe && (
                       <>
                         <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)} id={`expense-edit-${item.id}`}>編輯</button>
                         <button className="btn btn-danger btn-sm" onClick={() => handleDelete(item.id)} id={`expense-delete-${item.id}`}>刪除</button>

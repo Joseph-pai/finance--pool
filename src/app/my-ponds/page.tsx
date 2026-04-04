@@ -19,6 +19,7 @@ export default function MyPondsPage() {
   const [pondB, setPondB]         = useState<PondB | null>(null);
   const [incomes, setIncomes]     = useState<IncomeItem[]>([]);
   const [expenses, setExpenses]   = useState<ExpenseItem[]>([]);
+  const [totalExpense, setTotalExpense] = useState(0);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading]     = useState(true);
   const [tab, setTab]             = useState<'overview' | 'history'>('overview');
@@ -30,22 +31,26 @@ export default function MyPondsPage() {
       supabase.from('pond_a').select('*').eq('user_id', profile.id).single(),
       supabase.from('pond_b').select('*').eq('user_id', profile.id).single(),
       supabase.from('income_items').select('*').eq('user_id', profile.id).order('expected_date', { ascending: false }).limit(5),
-      supabase.from('expense_items').select('*').eq('user_id', profile.id).order('expected_date', { ascending: false }).limit(5),
+      supabase.from('expense_items').select('*').eq('user_id', profile.id).order('expected_date', { ascending: false }),
       supabase.from('transactions').select('*').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(20),
     ]);
+    const expData = (expRes.data ?? []) as ExpenseItem[];
+    const sum = expData.reduce((acc, curr) => acc + curr.amount, 0);
+
     setPondA(pARes.data as PondA | null);
     setPondB(pBRes.data as PondB | null);
     setIncomes((incRes.data ?? []) as IncomeItem[]);
-    setExpenses((expRes.data ?? []) as ExpenseItem[]);
+    setExpenses(expData.slice(0, 5));
+    setTotalExpense(sum);
     setTransactions((txRes.data ?? []) as Transaction[]);
     setLoading(false);
   }, [profile?.id, profile?.family_id, supabase]);
 
   useEffect(() => { load(); }, [load]);
 
-  const maxBalance = Math.max(pondA?.current_balance ?? 0, pondB?.current_balance ?? 0, 1) * 1.3;
+  const maxBalance = Math.max(pondA?.current_balance ?? 0, totalExpense, 1) * 1.3;
   const aLevel = calcWaterLevel(pondA?.current_balance ?? 0, maxBalance);
-  const bLevel = calcWaterLevel(pondB?.current_balance ?? 0, maxBalance);
+  const bLevel = calcWaterLevel(totalExpense, maxBalance);
 
   const typeLabel: Record<string, { text: string; color: string }> = {
     income:           { text: '收入',   color: 'var(--status-success)' },
@@ -113,7 +118,7 @@ export default function MyPondsPage() {
 
             {/* Pond B */}
             <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(124,58,237,0.3)' }}>
-              <WaterWave level={bLevel} variant="pond-b" height={180} label="💸 支出池 (池塘B)" amount={formatTWD(pondB?.current_balance ?? 0)} />
+              <WaterWave level={bLevel} variant="pond-b" height={180} label="💸 支出池 (池塘B)" amount={`-${formatTWD(totalExpense)}`} />
               <div style={{ padding: 'var(--space-5)' }}>
                 <div className="flex gap-3">
                   <button className="btn btn-primary btn-sm flex-1" onClick={() => router.push('/expenses')} id="ponds-go-expense">+ 記錄支出</button>

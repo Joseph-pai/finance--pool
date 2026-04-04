@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
 import WaterWave from '@/components/animations/WaterWave';
 import { formatTWD, calcWaterLevel, calculateLakeDryDate } from '@/lib/predictions';
-import { Lake, PondA, PondB, Profile, LakeExpense, LakeRequest, DryPrediction } from '@/types';
+import { Lake, PondA, PondB, Profile, LakeExpense, LakeRequest, DryPrediction, ExpenseItem } from '@/types';
 import { format } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
 
@@ -14,6 +14,7 @@ interface MemberData {
   profile: Profile;
   pond_a: PondA | null;
   pond_b: PondB | null;
+  totalExpense: number;
 }
 
 export default function DashboardPage() {
@@ -32,13 +33,14 @@ export default function DashboardPage() {
     if (!profile?.family_id) return;
     setLoading(true);
 
-    const [lakeRes, profilesRes, pondARes, pondBRes, lakeExpRes, requestsRes] = await Promise.all([
+    const [lakeRes, profilesRes, pondARes, pondBRes, lakeExpRes, requestsRes, expenseItemsRes] = await Promise.all([
       supabase.from('lake').select('*').eq('family_id', profile.family_id).single(),
       supabase.from('profiles').select('*').eq('family_id', profile.family_id),
       supabase.from('pond_a').select('*').eq('family_id', profile.family_id),
       supabase.from('pond_b').select('*').eq('family_id', profile.family_id),
       supabase.from('lake_expenses').select('*').eq('family_id', profile.family_id).eq('status', 'active'),
       supabase.from('lake_requests').select('*').eq('family_id', profile.family_id).eq('status', 'approved'),
+      supabase.from('expense_items').select('*').eq('family_id', profile.family_id),
     ]);
 
     const lakeData = lakeRes.data as Lake | null;
@@ -47,15 +49,21 @@ export default function DashboardPage() {
     const pondBData = (pondBRes.data ?? []) as PondB[];
     const expensesData = (lakeExpRes.data ?? []) as LakeExpense[];
     const requestsData = (requestsRes.data ?? []) as LakeRequest[];
+    const allExpenses = (expenseItemsRes.data ?? []) as ExpenseItem[];
 
     setLake(lakeData);
     setLakeExpenses(expensesData);
 
-    const memberList: MemberData[] = profilesData.map((p) => ({
-      profile: p,
-      pond_a: pondAData.find(a => a.user_id === p.id) ?? null,
-      pond_b: pondBData.find(b => b.user_id === p.id) ?? null,
-    }));
+    const memberList: MemberData[] = profilesData.map((p) => {
+      const pExpenses = allExpenses.filter(e => e.user_id === p.id);
+      const sum = pExpenses.reduce((acc, curr) => acc + curr.amount, 0);
+      return {
+        profile: p,
+        pond_a: pondAData.find(a => a.user_id === p.id) ?? null,
+        pond_b: pondBData.find(b => b.user_id === p.id) ?? null,
+        totalExpense: sum,
+      };
+    });
     setMembers(memberList);
 
     // 計算乾涸預測
@@ -64,9 +72,10 @@ export default function DashboardPage() {
       setPrediction(pred);
     }
 
-    // 計算最大參考水位（湖泊 + 所有池塘A之和）
+    // 計算最大參考水位（湖泊 + 所有池塘A之和 + 最大支出之一）
     const totalA = pondAData.reduce((sum, p) => sum + p.current_balance, 0);
-    const mx = Math.max(lakeData?.current_balance ?? 0, totalA, 1);
+    const maxB = Math.max(0, ...memberList.map(m => m.totalExpense));
+    const mx = Math.max(lakeData?.current_balance ?? 0, totalA, maxB, 1);
     setMaxBalance(mx * 1.3);
 
     setLoading(false);
@@ -220,7 +229,7 @@ export default function DashboardPage() {
         <div style={{ display: 'grid', gap: 'var(--space-5)', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
           {members.map((m) => {
             const aLevel = calcWaterLevel(m.pond_a?.current_balance ?? 0, maxBalance);
-            const bLevel = calcWaterLevel(m.pond_b?.current_balance ?? 0, maxBalance);
+            const bLevel = calcWaterLevel(m.totalExpense, maxBalance);
             const isMe = m.profile.id === profile?.id;
 
             return (
@@ -273,7 +282,7 @@ export default function DashboardPage() {
                     </div>
                     <WaterWave level={bLevel} variant="pond-b" height={100} />
                     <div className="amount-display amount-small amount-pond-b" style={{ marginTop: 'var(--space-2)', textAlign: 'center' }}>
-                      {formatTWD(m.pond_b?.current_balance ?? 0)}
+                      -{formatTWD(m.totalExpense)}
                     </div>
                   </div>
                 </div>

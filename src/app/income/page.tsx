@@ -232,35 +232,30 @@ export default function IncomePage() {
                     <span className="amount-display amount-small amount-pond-a">{formatTWD(item.amount)}</span>
 
                     {/* Actions — only for own items */}
-                    {isMe && item.status === 'pending' && (
+                    {isMe && (
                       <>
-                        <button className="btn btn-success btn-sm" onClick={() => openConfirm(item)} id={`income-confirm-${item.id}`}>
-                          確認到帳
-                        </button>
-                        <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)} id={`income-edit-${item.id}`}>
-                          編輯
-                        </button>
-                      </>
-                    )}
-                    {isMe && item.status === 'confirmed' && (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          className="form-input"
-                          style={{ width: 100, padding: '4px 8px', fontSize: '0.85rem' }}
-                          placeholder="注入金額"
-                          value={transferAmount}
-                          onChange={e => setTransferAmount(e.target.value)}
-                          id={`income-transfer-input-${item.id}`}
-                        />
-                        <button className="btn btn-primary btn-sm" onClick={() => handleTransferToLake(item)} disabled={saving} id={`income-transfer-${item.id}`}>
-                          注入湖泊
-                        </button>
-                      </div>
-                    )}
-                    {isMe && item.status === 'failed' && (
-                      <>
-                        <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)}>重新設定</button>
+                        {item.status === 'pending' && (
+                          <button className="btn btn-success btn-sm" onClick={() => openConfirm(item)} id={`income-confirm-${item.id}`}>
+                            確認到帳
+                          </button>
+                        )}
+                        {item.status === 'confirmed' && (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              className="form-input"
+                              style={{ width: 100, padding: '4px 8px', fontSize: '0.85rem' }}
+                              placeholder="注入金額"
+                              value={transferAmount}
+                              onChange={e => setTransferAmount(e.target.value)}
+                              id={`income-transfer-input-${item.id}`}
+                            />
+                            <button className="btn btn-primary btn-sm" onClick={() => handleTransferToLake(item)} disabled={saving} id={`income-transfer-${item.id}`}>
+                              注入湖泊
+                            </button>
+                          </div>
+                        )}
+                        <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)} id={`income-edit-${item.id}`}>編輯</button>
                         <button className="btn btn-danger btn-sm" onClick={() => handleDelete(item.id)} id={`income-delete-${item.id}`}>刪除</button>
                       </>
                     )}
