@@ -3,14 +3,14 @@
 -- 包含：負數保護、自動同步、以及 A->B 注水功能支援
 -- ==========================================
 
--- 1. 增加約束：確保池塘水位符合物理邏輯
+-- 1. 清理現有的異常數值 (歸零)，以確保後續能成功建立約束
+UPDATE pond_a SET current_balance = 0 WHERE current_balance < 0;
+
+-- 2. 增加約束：確保池塘水位符合物理邏輯
 -- 收入池 (Pond A) 必須為正數或零
 ALTER TABLE pond_a ADD CONSTRAINT pond_a_no_negative CHECK (current_balance >= 0);
 -- 支出池 (Pond B) 必須為負數或零
 ALTER TABLE pond_b ADD CONSTRAINT pond_b_no_positive CHECK (current_balance <= 0);
-
--- 2. 清理 Joseph 目前的異常數值 (歸零)
-UPDATE pond_a SET current_balance = 0 WHERE current_balance < 0;
 
 -- 3. 定義統一的餘額同步函數 (Income -> Pond A)
 CREATE OR REPLACE FUNCTION fn_sync_income_to_pond_a()

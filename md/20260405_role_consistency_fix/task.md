@@ -10,3 +10,14 @@
         - [x] 實作 A 池注水至 B 池功能 (彈窗與轉帳邏輯)
     - [x] 清理收入管理與支出管理的前端餘額邏輯 (交給觸發器)
     - [x] 最終驗證與 Push 至 GitHub
+
+- [x] 「調節後水量」卡片開發 (Adjusted Pond Card)
+    - [x] 備份與準備 (Backup & Prep)
+    - [x] 水位主組件 (WaterWave) 擴展 `adjusted` 變體
+    - [x] 調節邏輯實作 (Calculation & Aggregation)
+        - [x] 計算 `A + B` 餘額
+        - [x] 彙整「已執行」清單 (Confirmed/Completed)
+        - [x] 彙整「未執行」清單 (Pending/Planned)
+    - [x] 第三張卡片 UI 佈局開發
+    - [x] 全站同步連動測試
+    - [x] 最終驗證與 Push 至 GitHub

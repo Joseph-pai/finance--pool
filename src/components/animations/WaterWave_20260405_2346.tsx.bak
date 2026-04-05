@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 
 interface WaterWaveProps {
   level: number;           // 0–100 水位百分比
-  variant?: 'lake' | 'pond-a' | 'pond-b' | 'adjusted';
+  variant?: 'lake' | 'pond-a' | 'pond-b';
   height?: number;         // 容器高度 px（預設 200）
   showPercent?: boolean;
   label?: string;
@@ -40,7 +40,6 @@ export default function WaterWave({
     },
     'pond-a': { wave: 'rgba(34,200,112,0.9)', fill: 'rgba(26,158,92,0.6)', glow: 'rgba(26,158,92,0.25)' },
     'pond-b': { wave: 'rgba(157,101,250,0.9)', fill: 'rgba(124,58,237,0.6)', glow: 'rgba(124,58,237,0.25)' },
-    'adjusted': { wave: 'rgba(56,189,248,0.9)', fill: 'rgba(14,165,233,0.6)', glow: 'rgba(14,165,233,0.25)' },
   };
 
   const c = colors[variant] || colors.lake;
