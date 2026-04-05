@@ -47,7 +47,7 @@ export default function RequestsPage() {
     setSaving(true);
     const approvedAmt = Number(reviewForm.approved_amount);
 
-    // 更新申請狀態與紀錄 (其餘由資料庫觸發器同步至湖泊與個人池塘)
+    // 更新申請狀態
     await supabase.from('lake_requests').update({
       status: 'approved',
       approved_amount: approvedAmt,
@@ -55,6 +55,11 @@ export default function RequestsPage() {
       admin_note: reviewForm.admin_note,
       reviewed_at: new Date().toISOString(),
     }).eq('id', reviewModal.id);
+
+    // 扣減湖泊餘額
+    const { data: lake } = await supabase.from('lake').select('current_balance, id').eq('family_id', profile.family_id).single();
+    const newBalance = Math.max(0, (lake?.current_balance ?? 0) - approvedAmt);
+    await supabase.from('lake').update({ current_balance: newBalance }).eq('id', lake?.id);
 
     // 記錄交易
     await supabase.from('transactions').insert({
