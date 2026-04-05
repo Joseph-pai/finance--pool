@@ -16,7 +16,8 @@
 
 ### 3. 前端界面優化
 - **權限控制 Hook**：更新了 `useAuth`，提供 `isAdmin`, `isLakeManager`, `canManageLake` 等便捷屬性。
-- **動態 UI**：管理頁面現在會根據角色動態顯示編輯/刪除/審批按鈕。
+- **動態 UI**：管理頁面與設置頁面現在會根據角色動態顯示編輯/刪除/審批按鈕。
+- **身分標籤優化**：在「設定」頁面中，明確區分並顯示了「🛡️ 系統管理者」與「🌊 湖泊管理者」，方便直觀管理。
 
 ---
 
@@ -31,6 +32,7 @@
 - [app/income/page.tsx](file:///Users/joseph/Downloads/Finance/family-pool/src/app/income/page.tsx): 實現 Admin 全局管理。
 - [app/expenses/page.tsx](file:///Users/joseph/Downloads/Finance/family-pool/src/app/expenses/page.tsx): 實現 Admin 全局管理。
 - [app/requests/page.tsx](file:///Users/joseph/Downloads/Finance/family-pool/src/app/requests/page.tsx): 實現 Lake Manager 審批功能。
+- [app/settings/page.tsx](file:///Users/joseph/Downloads/Finance/family-pool/src/app/settings/page.tsx): 實現系統管理者對所有成員角色的動態指派與管理。
 
 ---
 
