@@ -1,6 +1,6 @@
 // TypeScript 類型定義 — FamilyPool APP
 
-export type UserRole = 'admin' | 'lake_manager' | 'member';
+export type UserRole = 'admin' | 'member';
 
 export type IncomeStatus = 'pending' | 'confirmed' | 'failed';
 export type ExpenseSource = 'pond_a' | 'lake';

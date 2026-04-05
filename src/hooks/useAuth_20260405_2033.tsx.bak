@@ -11,9 +11,6 @@ interface AuthContextType {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
-  isAdmin: boolean;
-  isLakeManager: boolean;
-  canManageLake: boolean;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -22,9 +19,6 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   signIn: async () => ({ error: null }),
   signOut: async () => {},
-  isAdmin: false,
-  isLakeManager: false,
-  canManageLake: false,
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -71,12 +65,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   };
 
-  const isAdmin = profile?.role === 'admin';
-  const isLakeManager = profile?.role === 'lake_manager';
-  const canManageLake = isAdmin || isLakeManager;
-
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut, isAdmin, isLakeManager, canManageLake }}>
+    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );

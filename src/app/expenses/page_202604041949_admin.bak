@@ -11,7 +11,7 @@ import { zhTW } from 'date-fns/locale';
 type ModalMode = 'add' | 'edit' | null;
 
 export default function ExpensesPage() {
-  const { profile, isAdmin } = useAuth();
+  const { profile } = useAuth();
   const supabase = createClient();
 
   const [items, setItems]       = useState<(ExpenseItem & { profile?: Profile })[]>([]);
@@ -28,7 +28,6 @@ export default function ExpensesPage() {
     amount: '',
     source: 'pond_a' as 'pond_a' | 'lake',
     reason: '',
-    user_id: '',
   });
 
   const load = useCallback(async () => {
@@ -46,13 +45,13 @@ export default function ExpensesPage() {
   useEffect(() => { load(); }, [load]);
 
   const openAdd = () => {
-    setForm({ name: '', expected_date: format(new Date(), 'yyyy-MM-dd'), amount: '', source: 'pond_a', reason: '', user_id: profile?.id || '' });
+    setForm({ name: '', expected_date: format(new Date(), 'yyyy-MM-dd'), amount: '', source: 'pond_a', reason: '' });
     setSelected(null);
     setModal('add');
   };
 
   const openEdit = (item: ExpenseItem) => {
-    setForm({ name: item.name, expected_date: item.expected_date, amount: String(item.amount), source: item.source, reason: '', user_id: item.user_id });
+    setForm({ name: item.name, expected_date: item.expected_date, amount: String(item.amount), source: item.source, reason: '' });
     setSelected(item);
     setModal('edit');
   };
@@ -62,7 +61,6 @@ export default function ExpensesPage() {
   const handleSave = async () => {
     if (!profile?.family_id) return;
     setSaving(true);
-    const targetUserId = form.user_id || profile.id;
 
     if (modal === 'add') {
       const { data: newItem } = await supabase.from('expense_items').insert({
@@ -71,14 +69,14 @@ export default function ExpensesPage() {
         amount: Number(form.amount),
         source: form.source,
         family_id: profile.family_id,
-        user_id: targetUserId,
+        user_id: profile.id,
         status: form.source === 'lake' ? 'planned' : 'planned',
       }).select().single();
 
       // 如果選擇用湖泊資金，自動建立申請
       if (form.source === 'lake' && newItem) {
         await supabase.from('lake_requests').insert({
-          requester_id: targetUserId,
+          requester_id: profile.id,
           family_id: profile.family_id,
           item_name: form.name,
           requested_amount: Number(form.amount),
@@ -96,19 +94,19 @@ export default function ExpensesPage() {
               family_id: profile.family_id,
               type: 'lake_request',
               title: '新的湖泊調撥申請',
-              message: `${profile.display_name} 代為申請使用湖泊資金 ${formatTWD(Number(form.amount))} 用於「${form.name}」`,
+              message: `${profile.display_name} 申請使用湖泊資金 ${formatTWD(Number(form.amount))} 用於「${form.name}」`,
               reference_id: newItem.id,
             }))
           );
         }
       } else if (form.source === 'pond_a' && newItem) {
         // 從 pond_a 扣除
-        const { data: pondA } = await supabase.from('pond_a').select('current_balance').eq('user_id', targetUserId).single();
+        const { data: pondA } = await supabase.from('pond_a').select('current_balance').eq('user_id', profile.id).single();
         const newBalance = Math.max(0, (pondA?.current_balance ?? 0) - Number(form.amount));
-        await supabase.from('pond_a').update({ current_balance: newBalance }).eq('user_id', targetUserId);
+        await supabase.from('pond_a').update({ current_balance: newBalance }).eq('user_id', profile.id);
         await supabase.from('expense_items').update({ status: 'completed' }).eq('id', newItem.id);
         await supabase.from('transactions').insert({
-          family_id: profile.family_id, user_id: targetUserId,
+          family_id: profile.family_id, user_id: profile.id,
           type: 'expense', amount: Number(form.amount),
           source: 'pond_a', reference_id: newItem.id,
           note: form.name, transaction_date: form.expected_date,
@@ -119,7 +117,6 @@ export default function ExpensesPage() {
         name: form.name,
         expected_date: form.expected_date,
         amount: Number(form.amount),
-        user_id: targetUserId,
       }).eq('id', selected.id);
     }
 
@@ -193,7 +190,6 @@ export default function ExpensesPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
           {filtered.map((item) => {
             const isMe = item.user_id === profile?.id;
-            const canEdit = isMe || isAdmin;
             const sl = statusLabel[item.status] ?? statusLabel.planned;
             const src = sourceLabel[item.source] ?? sourceLabel.pond_a;
 
@@ -221,7 +217,7 @@ export default function ExpensesPage() {
 
                   <div className="flex items-center gap-3">
                     <span className="amount-display amount-small amount-negative">-{formatTWD(item.amount)}</span>
-                    {canEdit && (
+                    {isMe && (
                       <>
                         <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)} id={`expense-edit-${item.id}`}>編輯</button>
                         <button className="btn btn-danger btn-sm" onClick={() => handleDelete(item.id)} id={`expense-delete-${item.id}`}>刪除</button>
@@ -244,14 +240,6 @@ export default function ExpensesPage() {
               <button className="btn btn-ghost btn-sm" onClick={closeModal} id="expense-modal-close">✕</button>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-              {isAdmin && (
-                <div className="form-group">
-                  <label className="form-label">所屬成員</label>
-                  <select id="expense-form-user" className="form-input form-select" value={form.user_id} onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))}>
-                    {members.map(m => <option key={m.id} value={m.id}>{m.display_name}</option>)}
-                  </select>
-                </div>
-              )}
               <div className="form-group">
                 <label className="form-label">支出名稱</label>
                 <input id="expense-form-name" type="text" className="form-input" placeholder="例：餐費、交通費" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />

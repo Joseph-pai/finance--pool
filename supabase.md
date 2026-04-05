@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   family_id UUID REFERENCES families(id) ON DELETE CASCADE,
   display_name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin', 'member')) DEFAULT 'member',
+  role TEXT NOT NULL CHECK (role IN ('admin', 'lake_manager', 'member')) DEFAULT 'member',
   avatar_url TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -225,6 +225,12 @@ RETURNS BOOLEAN AS $$
   SELECT EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin');
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
+-- Helper function: 判斷當前用戶是否為湖泊管理者 (Admin 也具備此權限)
+CREATE OR REPLACE FUNCTION is_lake_manager()
+RETURNS BOOLEAN AS $$
+  SELECT EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'lake_manager'));
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
 -- families: 同家庭成員可讀，admin 可改
 CREATE POLICY "family_read" ON families FOR SELECT USING (id = get_my_family_id());
 CREATE POLICY "family_admin_write" ON families FOR ALL USING (id = get_my_family_id() AND is_admin());
@@ -238,29 +244,29 @@ CREATE POLICY "profiles_admin_all" ON profiles FOR ALL USING (is_admin());
 CREATE POLICY "lake_read" ON lake FOR SELECT USING (family_id = get_my_family_id());
 CREATE POLICY "lake_admin_write" ON lake FOR ALL USING (family_id = get_my_family_id() AND is_admin());
 
--- pond_a, pond_b: 同家庭所有人可讀；只能自己寫自己的
+-- pond_a, pond_b: 同家庭所有人可讀；只能自己寫自己的（Admin 可全改）
 CREATE POLICY "pond_a_read" ON pond_a FOR SELECT USING (family_id = get_my_family_id());
-CREATE POLICY "pond_a_self_write" ON pond_a FOR ALL USING (user_id = auth.uid());
+CREATE POLICY "pond_a_self_write" ON pond_a FOR ALL USING (user_id = auth.uid() OR is_admin());
 CREATE POLICY "pond_b_read" ON pond_b FOR SELECT USING (family_id = get_my_family_id());
-CREATE POLICY "pond_b_self_write" ON pond_b FOR ALL USING (user_id = auth.uid());
+CREATE POLICY "pond_b_self_write" ON pond_b FOR ALL USING (user_id = auth.uid() OR is_admin());
 
--- income_items: 同家庭所有人可讀；只能自己寫自己的
+-- income_items: 同家庭所有人可讀；只能自己寫自己的（Admin 可全改）
 CREATE POLICY "income_read" ON income_items FOR SELECT USING (family_id = get_my_family_id());
-CREATE POLICY "income_self_write" ON income_items FOR ALL USING (user_id = auth.uid());
+CREATE POLICY "income_write" ON income_items FOR ALL USING (user_id = auth.uid() OR is_admin());
 
--- expense_items: 同家庭所有人可讀；只能自己寫自己的
+-- expense_items: 同家庭所有人可讀；只能自己寫自己的（Admin 可全改）
 CREATE POLICY "expense_read" ON expense_items FOR SELECT USING (family_id = get_my_family_id());
-CREATE POLICY "expense_self_write" ON expense_items FOR ALL USING (user_id = auth.uid());
+CREATE POLICY "expense_write" ON expense_items FOR ALL USING (user_id = auth.uid() OR is_admin());
 
--- lake_expenses: 同家庭所有人可讀；admin 可寫
+-- lake_expenses: 同家庭所有人可讀；admin/manager 可寫
 CREATE POLICY "lake_expenses_read" ON lake_expenses FOR SELECT USING (family_id = get_my_family_id());
-CREATE POLICY "lake_expenses_admin_write" ON lake_expenses FOR ALL USING (family_id = get_my_family_id() AND is_admin());
+CREATE POLICY "lake_expenses_manager_write" ON lake_expenses FOR ALL USING (family_id = get_my_family_id() AND is_lake_manager());
 
--- lake_requests: 同家庭所有人可讀；自己可新增；admin 可審批（UPDATE）
+-- lake_requests: 同家庭所有人可讀；自己可新增；admin/manager 可審批（UPDATE）
 CREATE POLICY "lake_requests_read" ON lake_requests FOR SELECT USING (family_id = get_my_family_id());
 CREATE POLICY "lake_requests_self_insert" ON lake_requests FOR INSERT WITH CHECK (requester_id = auth.uid());
 CREATE POLICY "lake_requests_self_update" ON lake_requests FOR UPDATE USING (requester_id = auth.uid() AND status = 'pending');
-CREATE POLICY "lake_requests_admin_update" ON lake_requests FOR UPDATE USING (is_admin());
+CREATE POLICY "lake_requests_manager_update" ON lake_requests FOR UPDATE USING (is_lake_manager());
 
 -- transactions: 同家庭所有人可讀；系統寫入（service role）
 CREATE POLICY "transactions_read" ON transactions FOR SELECT USING (family_id = get_my_family_id());

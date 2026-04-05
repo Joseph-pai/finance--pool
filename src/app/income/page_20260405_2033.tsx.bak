@@ -11,7 +11,7 @@ import { zhTW } from 'date-fns/locale';
 type ModalMode = 'add' | 'edit' | 'confirm' | null;
 
 export default function IncomePage() {
-  const { profile, isAdmin } = useAuth();
+  const { profile } = useAuth();
   const supabase = createClient();
 
   const [items, setItems]         = useState<(IncomeItem & { profile?: Profile })[]>([]);
@@ -209,7 +209,7 @@ export default function IncomePage() {
           {filtered.map((item) => {
             const isOverdue = item.status === 'pending' && isAfter(new Date(), parseISO(item.expected_date));
             const isMe = item.user_id === profile?.id;
-            const canEdit = isMe || isAdmin;
+            const canEdit = isMe || profile?.role === 'admin';
             const sl = statusLabel[item.status];
 
             return (
@@ -280,7 +280,7 @@ export default function IncomePage() {
               <button className="btn btn-ghost btn-sm" onClick={closeModal} id="income-modal-close">✕</button>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-              {isAdmin && (
+              {profile?.role === 'admin' && (
                 <div className="form-group">
                   <label className="form-label">所屬成員</label>
                   <select id="income-form-user" className="form-input form-select" value={form.user_id} onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))}>

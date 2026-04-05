@@ -9,7 +9,7 @@ import { format, parseISO } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
 
 export default function RequestsPage() {
-  const { profile, canManageLake } = useAuth();
+  const { profile } = useAuth();
   const supabase = createClient();
 
   const [requests, setRequests] = useState<(LakeRequest & { profile?: Profile })[]>([]);
@@ -126,7 +126,7 @@ export default function RequestsPage() {
       <div className="page-header">
         <h1 className="page-title">📋 湖泊調撥申請</h1>
         <p className="page-subtitle">
-          {canManageLake ? '審批成員的湖泊資金申請' : '查看您的湖泊資金申請狀態'}
+          {profile?.role === 'admin' ? '審批成員的湖泊資金申請' : '查看您的湖泊資金申請狀態'}
         </p>
       </div>
 
@@ -199,8 +199,8 @@ export default function RequestsPage() {
                     </div>
                   </div>
 
-                  {/* Admin/Manager Actions */}
-                  {canManageLake && req.status === 'pending' && (
+                  {/* Admin Actions */}
+                  {profile?.role === 'admin' && req.status === 'pending' && (
                     <button className="btn btn-primary btn-sm" onClick={() => openReview(req)} id={`req-review-${req.id}`}>
                       審批
                     </button>
@@ -212,7 +212,7 @@ export default function RequestsPage() {
         </div>
       )}
 
-      {/* Review Modal (Admin/Manager Only) */}
+      {/* Review Modal (Admin Only) */}
       {reviewModal && (
         <div className="modal-overlay" onClick={() => setReviewModal(null)}>
           <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
