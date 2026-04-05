@@ -1,0 +1,7 @@
+- [ ] 備份核心邏輯文件 (Backup core files)
+- [ ] 更新類型定義 (Update types/index.ts)
+- [ ] 更新認證 Hook (Update useAuth.ts)
+- [ ] 修改收入管理頁面 (Modify income page)
+- [ ] 修改支出管理頁面 (Modify expenses page)
+- [ ] 修改審批請求頁面 (Modify requests page)
+- [ ] 推送到 GitHub (Push to GitHub)
