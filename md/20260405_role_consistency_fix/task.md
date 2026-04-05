@@ -1,8 +1,11 @@
 - [x] 建立實施計畫與任務清單 (md 存放於 `/md/20260405_role_consistency_fix/`)
 - [x] 備份原始文件 (加上日期時間後綴)
-    - [x] `src/app/dashboard/page.tsx`
-    - [x] `src/app/settings/page.tsx`
 - [x] 修正 `src/app/dashboard/page.tsx` 角色顯示邏輯
-- [x] 修正 `src/app/settings/page.tsx` 角色顯示標籤統一為「管理員」
-- [x] 驗證儀表板顯示是否與 Supabase 角色對應正確
-- [/] 撰寫完成報告 (Walkthrough)
+- [x] 修正 `src/app/settings/page.tsx` 帳號分頁標籤
+- [x] 全站審計與修復 (Audit Fixes)
+    - [x] 備份 `lake/page.tsx` 與 `expenses/page.tsx`
+    - [x] 修正 `src/app/lake/page.tsx` 存取權限 (開放給湖泊管理員)
+    - [x] 修正 `src/app/expenses/page.tsx` 通知邏輯 (支援多個管理員)
+    - [x] 修正 `src/app/settings/page.tsx` 彈窗選單名稱 (管理者 ➔ 管理員)
+- [x] 驗證全站角色與名稱對應正確
+- [/] 撰寫完成報告與推送至 GitHub

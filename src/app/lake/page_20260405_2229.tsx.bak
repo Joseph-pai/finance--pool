@@ -13,7 +13,7 @@ import WaterWave from '@/components/animations/WaterWave';
 type ModalMode = 'add' | 'edit' | 'set-balance' | null;
 
 export default function LakePage() {
-  const { profile, canManageLake } = useAuth();
+  const { profile } = useAuth();
   const router = useRouter();
   const supabase = createClient();
 
@@ -56,7 +56,7 @@ export default function LakePage() {
   }, [profile?.family_id, supabase]);
 
   useEffect(() => {
-    if (profile && !canManageLake) router.replace('/dashboard');
+    if (profile && profile.role !== 'admin') router.replace('/dashboard');
     else load();
   }, [profile, router, load]);
 

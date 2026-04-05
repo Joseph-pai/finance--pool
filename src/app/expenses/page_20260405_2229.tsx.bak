@@ -87,12 +87,12 @@ export default function ExpensesPage() {
           status: 'pending',
         });
 
-        // 發送通知給管理員 (系統管理員與湖泊管理員)
-        const { data: managers } = await supabase.from('profiles').select('id').eq('family_id', profile.family_id).in('role', ['admin', 'lake_manager']);
-        if (managers && managers.length > 0) {
+        // 發送通知給管理員
+        const { data: admins } = await supabase.from('profiles').select('id').eq('family_id', profile.family_id).eq('role', 'admin');
+        if (admins && admins.length > 0) {
           await supabase.from('notifications').insert(
-            managers.map(m => ({
-              user_id: m.id,
+            admins.map(a => ({
+              user_id: a.id,
               family_id: profile.family_id,
               type: 'lake_request',
               title: '新的湖泊調撥申請',

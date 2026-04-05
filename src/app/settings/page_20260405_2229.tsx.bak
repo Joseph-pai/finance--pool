@@ -209,8 +209,8 @@ export default function SettingsPage() {
                 <label className="form-label">角色權限</label>
                 <select id="settings-form-role" className="form-input form-select" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as UserRole }))}>
                   <option value="member">👤 家庭成員 (一般權限)</option>
-                  <option value="lake_manager">🌊 湖泊管理員 (財務審批)</option>
-                  <option value="admin">🛡️ 系統管理員 (最高權限)</option>
+                  <option value="lake_manager">🌊 湖泊管理者 (財務審批)</option>
+                  <option value="admin">🛡️ 系統管理者 (最高權限)</option>
                 </select>
               </div>
               {error && <div className="alert alert-error"><span>⚠️</span> {error}</div>}
