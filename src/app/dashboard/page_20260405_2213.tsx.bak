@@ -251,8 +251,7 @@ export default function DashboardPage() {
                         {isMe && <span className="badge badge-info" style={{ marginLeft: 8, fontSize: '0.65rem' }}>我</span>}
                       </div>
                       <div className="text-xs text-muted">
-                        {m.profile.role === 'admin' ? '🛡️ 系統管理員' : 
-                         m.profile.role === 'lake_manager' ? '🌊 湖泊管理員' : '👤 家庭成員'}
+                        {m.profile.role === 'admin' ? '湖泊管理員' : '家庭成員'}
                       </div>
                     </div>
                   </div>

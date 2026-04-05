@@ -1,0 +1,8 @@
+- [x] 建立實施計畫與任務清單 (md 存放於 `/md/20260405_role_consistency_fix/`)
+- [x] 備份原始文件 (加上日期時間後綴)
+    - [x] `src/app/dashboard/page.tsx`
+    - [x] `src/app/settings/page.tsx`
+- [x] 修正 `src/app/dashboard/page.tsx` 角色顯示邏輯
+- [x] 修正 `src/app/settings/page.tsx` 角色顯示標籤統一為「管理員」
+- [x] 驗證儀表板顯示是否與 Supabase 角色對應正確
+- [/] 撰寫完成報告 (Walkthrough)

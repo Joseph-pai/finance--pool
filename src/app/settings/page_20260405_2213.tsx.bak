@@ -125,8 +125,8 @@ export default function SettingsPage() {
           <div style={{ flex: 1 }}>
             <div className="font-semibold">{profile?.display_name}</div>
             <div className="text-sm text-secondary">
-              {profile?.role === 'admin' ? '🛡️ 系統管理員' : 
-               profile?.role === 'lake_manager' ? '🌊 湖泊管理員' : '👤 家庭成員'}
+              {profile?.role === 'admin' ? '🛡️ 系統管理者' : 
+               profile?.role === 'lake_manager' ? '🌊 湖泊管理者' : '👤 家庭成員'}
             </div>
           </div>
         </div>
@@ -158,8 +158,8 @@ export default function SettingsPage() {
                         {m.id === profile?.id && <span className="badge badge-info" style={{ marginLeft: 8, fontSize: '0.65rem' }}>我</span>}
                       </div>
                       <div className="text-xs text-muted">
-                        {m.role === 'admin' ? '🛡️ 系統管理員' : 
-                         m.role === 'lake_manager' ? '🌊 湖泊管理員' : '👤 家庭成員'}
+                        {m.role === 'admin' ? '系統管理者' : 
+                         m.role === 'lake_manager' ? '湖泊管理者' : '家庭成員'}
                       </div>
                     </div>
                   </div>
