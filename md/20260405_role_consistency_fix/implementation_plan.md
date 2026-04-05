@@ -1,43 +1,55 @@
-# 全站操作權限與名稱一致性審計及修復計畫
+# 池塘邏輯修正與功能增強計畫 (A/B 池同步與注水)
 
-經過對全站代碼的初步審計，發現了幾處權限範圍不當以及名稱尚未完全統一的地方。本計畫將修正這些問題，確保「系統管理員」與「湖泊管理員」的權限與名稱符合設計預期。
+本計畫旨在解決 Joseph 帳號中出現的負數餘額問題，並落實使用者要求的「收入池 (A)」與「支出池 (B)」核心邏輯，包含新增「收入池注水至支出池」的功能。
 
 ## 使用者確認事項
 
 > [!IMPORTANT]
-> **主要修復內容：**
-> 1. **開放湖泊管理權限**：目前「湖泊管理」頁面錯誤地限制僅「系統管理員」可進入。我們將開放給「湖泊管理員」進入。
-> 2. **優化通知邏輯**：當成員申請湖泊資金時，目前僅通知「系統管理員」。我們將同時通知「湖泊管理員」。
-> 3. **純化名稱**：將設定頁面彈窗中殘留的「管理者」改為「管理員」。
+> **核心邏輯規範：**
+> 1. **收入池 (Pond A)**：僅包含「已到帳」收入減去「轉出金額」。**餘額必須恆大於等於 0**。
+> 2. **支出池 (Pond B)**：包含「已完成」支出（負值）加上「來自 A 池的注水」。**餘額必須恆小於等於 0**。
+> 3. **連動機制**：
+>    - 刪除已到帳收入：扣回 A 池餘額（若餘額不足則設為 0）。
+>    - 刪除已完成支出：補回 B 池餘額（使其趨近於 0）。
+>    - A 池注水至 B 池：A 池減少，B 池數值增加（趨近於 0）。
 
 ## 擬議變更
 
-### 1. 權限範圍修正
+### 1. 資料庫層面 (Database & Migration)
 
-#### [MODIFY] [lake/page.tsx](file:///Users/joseph/Downloads/Finance/family-pool/src/app/lake/page.tsx)
-- 修正 `useEffect` 中的權限檢查：將 `profile.role !== 'admin'` 改為使用 `!canManageLake`。
-- 確保「湖泊管理員」可以查看並操作湖泊餘額與循環支出。
+#### [NEW] [fix_pond_constraints.sql](file:///Users/joseph/Downloads/Finance/family-pool/supabase/migrations/002_fix_pond_logic.sql)
+- **增加約束**：為 `pond_a` 增加 `CHECK (current_balance >= 0)`，為 `pond_b` 增加 `CHECK (current_balance <= 0)`。
+- **重寫/修正觸發器**：
+    - 確保 `DELETE ON income_items` 時，使用 `GREATEST(0, current_balance - amount)`。
+    - 確保 `DELETE ON expense_items` 時，使用 `LEAST(0, current_balance + amount)`。
+    - 修正現有 -870 錯誤：將低於 0 的 A 池餘額歸零。
 
-#### [MODIFY] [expenses/page.tsx](file:///Users/joseph/Downloads/Finance/family-pool/src/app/expenses/page.tsx)
-- 修正通知發送邏輯：在建立湖泊申請時，查詢所有具有 `admin` 或 `lake_manager` 角色的用戶並發送通知。
+### 2. 資料類型 (Types)
 
-### 2. 名稱標籤統一
+#### [MODIFY] [index.ts](file:///Users/joseph/Downloads/Finance/family-pool/src/types/index.ts)
+- `TransactionType` 增加 `transfer_to_pond_b`。
 
-#### [MODIFY] [settings/page.tsx](file:///Users/joseph/Downloads/Finance/family-pool/src/app/settings/page.tsx)
-- 修正新增/編輯成員彈窗中的選項標籤：
-    - 「🌊 湖泊管理者」➔ 「**🌊 湖泊管理員**」
-    - 「🛡️ 系統管理者」➔ 「**🛡️ 系統管理員**」
+### 3. 個人池塘頁面 (My Ponds)
+
+#### [MODIFY] [my-ponds/page.tsx](file:///Users/joseph/Downloads/Finance/family-pool/src/app/my-ponds/page.tsx)
+- **支出池顯示修正**：不再使用 `sum(items)` 計算，改為讀取 `pond_b.current_balance`。
+- **新增功能**：在 A 池卡片增加「注入支出池」按鈕與彈窗，允許輸入金額並執行轉帳。
+
+### 4. 收入與支出管理 (Income & Expenses)
+
+#### [MODIFY] [income/page.tsx](file:///Users/joseph/Downloads/Finance/family-pool/src/app/income/page.tsx)
+- 確保所有餘額操作均符合「不為負數」原則。
 
 ---
 
 ## 驗證計畫
 
-### 手動驗證
-1. **角色切換測試**：
-    - 以 `Hadassah` (湖泊管理員) 身份登入，確認可進入「湖泊管理」頁面。
-    - 以 `Johnny` (一般成員) 身份登入，確認提交湖泊支出申請後，系統會同時通知 `Joseph` 與 `Hadassah`。
-2. **UI 檢查**：
-    - 檢查「設定」中的下拉選單，確認沒有「管理者」字樣出現。
+### 自動化檢查
+- 嘗試刪除大於餘額的收入記錄，確認 SQL 觸發器能正確擋住或歸零而非產生負數。
 
-### 安全保障
-- 修改前將為涉及的文件建立 `_20260405_2224.tsx.bak` 備份。
+### 手動驗證
+1. **注入測試**：從 A 池轉 1000 至 B 池，確認 A 池減少 1000，B 池（負數）增加 1000。
+2. **零點測試**：確認 B 池注滿後不可變為正數，A 池扣完後不可變為負數。
+
+### 背景分析 (-870 原因)
+根據交易記錄，系統自動扣除了 $117,500。由於之前可能沒有進行 `Math.max(0, ...)` 的檢查，且 A 池餘額在扣除前不足 $117,500，導致產生了 $-870 的異象。本修復將強制校正此數值。

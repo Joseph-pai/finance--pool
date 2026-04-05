@@ -19,12 +19,10 @@ export default function MyPondsPage() {
   const [pondB, setPondB]         = useState<PondB | null>(null);
   const [incomes, setIncomes]     = useState<IncomeItem[]>([]);
   const [expenses, setExpenses]   = useState<ExpenseItem[]>([]);
+  const [totalExpense, setTotalExpense] = useState(0);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading]     = useState(true);
   const [tab, setTab]             = useState<'overview' | 'history'>('overview');
-  const [showInjectModal, setShowInjectModal] = useState(false);
-  const [injectAmount, setInjectAmount] = useState('');
-  const [injecting, setInjecting] = useState(false);
 
   const load = useCallback(async () => {
     if (!profile?.id || !profile?.family_id) return;
@@ -37,65 +35,29 @@ export default function MyPondsPage() {
       supabase.from('transactions').select('*').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(20),
     ]);
     const expData = (expRes.data ?? []) as ExpenseItem[];
+    const sum = expData.reduce((acc, curr) => acc + curr.amount, 0);
 
     setPondA(pARes.data as PondA | null);
     setPondB(pBRes.data as PondB | null);
     setIncomes((incRes.data ?? []) as IncomeItem[]);
     setExpenses(expData.slice(0, 5));
+    setTotalExpense(sum);
     setTransactions((txRes.data ?? []) as Transaction[]);
     setLoading(false);
   }, [profile?.id, profile?.family_id, supabase]);
 
   useEffect(() => { load(); }, [load]);
 
-  const bBalance = pondB?.current_balance ?? 0;
-  const maxBalance = Math.max(pondA?.current_balance ?? 0, Math.abs(bBalance), 1) * 1.3;
+  const maxBalance = Math.max(pondA?.current_balance ?? 0, totalExpense, 1) * 1.3;
   const aLevel = calcWaterLevel(pondA?.current_balance ?? 0, maxBalance);
-  const bLevel = calcWaterLevel(Math.abs(bBalance), maxBalance);
+  const bLevel = calcWaterLevel(totalExpense, maxBalance);
 
   const typeLabel: Record<string, { text: string; color: string }> = {
     income:           { text: '收入',   color: 'var(--status-success)' },
     expense:          { text: '支出',   color: 'var(--status-error)' },
     transfer_to_lake: { text: '注入湖泊', color: 'var(--text-accent)' },
-    transfer_to_pond_b: { text: '注入支出池', color: 'var(--pond-b)' },
     lake_expense:     { text: '湖泊支出', color: 'var(--status-error)' },
     lake_to_member:   { text: '湖泊撥入', color: 'var(--status-success)' },
-  };
-
-  const handleTransferToPondB = async () => {
-    const amt = Number(injectAmount);
-    if (!amt || !profile || !pondA || !pondB) return;
-    setInjecting(true);
-
-    try {
-      // 1. 減少 Pond A
-      const newA = Math.max(0, pondA.current_balance - amt);
-      await supabase.from('pond_a').update({ current_balance: newA }).eq('id', pondA.id);
-
-      // 2. 增加 Pond B (使其趨於零)
-      const newB = Math.min(0, pondB.current_balance + amt);
-      await supabase.from('pond_b').update({ current_balance: newB }).eq('id', pondB.id);
-
-      // 3. 記錄交易
-      await supabase.from('transactions').insert({
-        family_id: profile.family_id,
-        user_id: profile.id,
-        type: 'transfer_to_pond_b',
-        amount: amt,
-        source: 'pond_a',
-        destination: 'pond_b',
-        note: '收入池注水至支出池',
-        transaction_date: new Date().toISOString().split('T')[0],
-      });
-
-      setShowInjectModal(false);
-      setInjectAmount('');
-      load();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setInjecting(false);
-    }
   };
 
   if (loading) {
@@ -136,10 +98,9 @@ export default function MyPondsPage() {
             <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(26,158,92,0.3)' }}>
               <WaterWave level={aLevel} variant="pond-a" height={180} label="💰 收入池 (池塘A)" amount={formatTWD(pondA?.current_balance ?? 0)} />
               <div style={{ padding: 'var(--space-5)' }}>
-                <div className="flex gap-2">
+                <div className="flex gap-3">
                   <button className="btn btn-success btn-sm flex-1" onClick={() => router.push('/income')} id="ponds-go-income">+ 記錄收入</button>
-                  <button className="btn btn-primary btn-sm flex-1" onClick={() => setShowInjectModal(true)} id="ponds-inject-b">→ 注入支出池</button>
-                  <button className="btn btn-ghost btn-sm flex-1" onClick={() => router.push('/income')} id="ponds-go-transfer">湖泊</button>
+                  <button className="btn btn-ghost btn-sm flex-1" onClick={() => router.push('/income')} id="ponds-go-transfer">→ 注入湖泊</button>
                 </div>
                 {incomes.length > 0 && (
                   <div style={{ marginTop: 'var(--space-4)' }}>
@@ -157,7 +118,7 @@ export default function MyPondsPage() {
 
             {/* Pond B */}
             <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(124,58,237,0.3)' }}>
-              <WaterWave level={bLevel} variant="pond-b" height={180} label="💸 支出池 (池塘B)" amount={formatTWD(bBalance)} />
+              <WaterWave level={bLevel} variant="pond-b" height={180} label="💸 支出池 (池塘B)" amount={`-${formatTWD(totalExpense)}`} />
               <div style={{ padding: 'var(--space-5)' }}>
                 <div className="flex gap-3">
                   <button className="btn btn-primary btn-sm flex-1" onClick={() => router.push('/expenses')} id="ponds-go-expense">+ 記錄支出</button>
@@ -218,34 +179,6 @@ export default function MyPondsPage() {
               </table>
             </div>
           )}
-        </div>
-      )}
-      {/* Injection Modal */}
-      {showInjectModal && (
-        <div className="modal-overlay" onClick={() => setShowInjectModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
-            <div className="modal-header">
-              <h3 className="modal-title">🌊 收入池注水至支出池</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setShowInjectModal(false)}>✕</button>
-            </div>
-            <div style={{ marginBottom: 'var(--space-5)' }}>
-              <p className="text-sm text-secondary">將收入池資金移轉至支出池，減少個人支出水位。</p>
-              <div className="flex justify-between text-xs font-mono" style={{ marginTop: 12, padding: 8, background: 'rgba(0,0,0,0.2)', borderRadius: 4 }}>
-                <span>可用：{formatTWD(pondA?.current_balance ?? 0)}</span>
-                <span>支出：{formatTWD(bBalance)}</span>
-              </div>
-            </div>
-            <div className="form-group" style={{ marginBottom: 'var(--space-6)' }}>
-              <label className="form-label">注入金額</label>
-              <input type="number" className="form-input" placeholder="0" value={injectAmount} onChange={e => setInjectAmount(e.target.value)} autoFocus />
-            </div>
-            <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
-              <button className="btn btn-ghost" onClick={() => setShowInjectModal(false)}>取消</button>
-              <button className="btn btn-primary" onClick={handleTransferToPondB} disabled={injecting || !injectAmount || Number(injectAmount) <= 0}>
-                {injecting ? '處理中...' : '確認注入'}
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>

@@ -102,9 +102,11 @@ export default function ExpensesPage() {
           );
         }
       } else if (form.source === 'pond_a' && newItem) {
-        // 直接更新狀態，其餘由資料庫觸發器同步至 pond_a 與 pond_b
+        // 從 pond_a 扣除
+        const { data: pondA } = await supabase.from('pond_a').select('current_balance').eq('user_id', targetUserId).single();
+        const newBalance = Math.max(0, (pondA?.current_balance ?? 0) - Number(form.amount));
+        await supabase.from('pond_a').update({ current_balance: newBalance }).eq('user_id', targetUserId);
         await supabase.from('expense_items').update({ status: 'completed' }).eq('id', newItem.id);
-        
         await supabase.from('transactions').insert({
           family_id: profile.family_id, user_id: targetUserId,
           type: 'expense', amount: Number(form.amount),

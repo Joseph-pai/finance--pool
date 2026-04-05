@@ -1,11 +1,12 @@
-- [x] 建立實施計畫與任務清單 (md 存放於 `/md/20260405_role_consistency_fix/`)
-- [x] 備份原始文件 (加上日期時間後綴)
-- [x] 修正 `src/app/dashboard/page.tsx` 角色顯示邏輯
-- [x] 修正 `src/app/settings/page.tsx` 帳號分頁標籤
-- [x] 全站審計與修復 (Audit Fixes)
-    - [x] 備份 `lake/page.tsx` 與 `expenses/page.tsx`
-    - [x] 修正 `src/app/lake/page.tsx` 存取權限 (開放給湖泊管理員)
-    - [x] 修正 `src/app/expenses/page.tsx` 通知邏輯 (支援多個管理員)
-    - [x] 修正 `src/app/settings/page.tsx` 彈窗選單名稱 (管理者 ➔ 管理員)
-- [x] 驗證全站角色與名稱對應正確
-- [/] 撰寫完成報告與推送至 GitHub
+- [x] 池塘邏輯修正與功能增強 (Pond Logic Fix & Features)
+    - [x] 備份原始文件 (Backup files)
+    - [x] 建立資料庫遷移檔 (Create SQL Migration v2)
+        - [x] 新增 `pond_a >= 0` 與 `pond_b <= 0` 約束
+        - [x] 重寫全自動同步觸發器 (Income & Expense)
+        - [x] 修復 Joseph 的 A 池負數餘額
+    - [x] 更新類型定義 (Update Types)
+    - [x] 個人池塘頁面 (My Ponds) 功能開發
+        - [x] 修正 B 池水位顯示 (改用讀取資料庫餘額)
+        - [x] 實作 A 池注水至 B 池功能 (彈窗與轉帳邏輯)
+    - [x] 清理收入管理與支出管理的前端餘額邏輯 (交給觸發器)
+    - [x] 最終驗證與 Push 至 GitHub

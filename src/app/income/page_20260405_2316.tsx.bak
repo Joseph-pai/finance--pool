@@ -82,12 +82,26 @@ export default function IncomePage() {
     const actualAmount = Number(confirmActual);
 
     if (confirmed) {
-      // 狀態更新與金額紀錄 (其餘由資料庫觸發器同步至 pond_a)
+      // 更新 income_items 狀態
       await supabase.from('income_items').update({
         status: 'confirmed',
         actual_amount: actualAmount,
         confirmed_at: new Date().toISOString(),
       }).eq('id', selected.id);
+
+      // 更新 pond_a 餘額
+      const targetUserId = selected.user_id;
+      const { data: pondA } = await supabase.from('pond_a').select('current_balance').eq('user_id', targetUserId).single();
+      const newBalance = (pondA?.current_balance ?? 0) + actualAmount;
+      await supabase.from('pond_a').upsert({ user_id: targetUserId, family_id: profile.family_id, current_balance: newBalance }, { onConflict: 'user_id' });
+
+      // 記錄交易
+      await supabase.from('transactions').insert({
+        family_id: profile.family_id, user_id: targetUserId,
+        type: 'income', amount: actualAmount,
+        destination: 'pond_a', reference_id: selected.id,
+        note: selected.name, transaction_date: new Date().toISOString().substring(0, 10),
+      });
     } else {
       await supabase.from('income_items').update({ status: 'failed' }).eq('id', selected.id);
     }
