@@ -18,6 +18,8 @@ interface MemberData {
   pendingIncomeTotal: number;
   /** 計畫中尚未完成的支出合計（planned + approved 狀態） */
   plannedExpenseTotal: number;
+  /** 已完成的支出合計（completed 狀態） */
+  completedExpenseTotal: number;
 }
 
 export default function DashboardPage() {
@@ -73,12 +75,18 @@ export default function DashboardPage() {
         .filter(e => e.status === 'planned' || e.status === 'approved')
         .reduce((acc, e) => acc + e.amount, 0);
 
+      // 已完成支出合計
+      const completedExpenseTotal = pExpenses
+        .filter(e => e.status === 'completed')
+        .reduce((acc, e) => acc + e.amount, 0);
+
       return {
         profile: p,
         pond_a: pondAData.find(a => a.user_id === p.id) ?? null,
         pond_b: pondBData.find(b => b.user_id === p.id) ?? null,
         pendingIncomeTotal,
         plannedExpenseTotal,
+        completedExpenseTotal,
       };
     });
     setMembers(memberList);
@@ -90,8 +98,8 @@ export default function DashboardPage() {
     }
 
     // 計算最大參考水位：取所有池塘 A 的最大值和湖泊餘額的最大值
-    const maxA = Math.max(0, ...pondAData.map(a => a.current_balance));
-    const maxB = Math.max(0, ...pondBData.map(b => Math.abs(b.current_balance)));
+    const maxA = Math.max(0, ...memberList.map(m => (m.pond_a?.current_balance ?? 0) + m.pendingIncomeTotal));
+    const maxB = Math.max(0, ...memberList.map(m => m.plannedExpenseTotal));
     const mx = Math.max(lakeData?.current_balance ?? 0, maxA, maxB, 1);
     setMaxBalance(mx * 1.3);
 
@@ -250,8 +258,11 @@ export default function DashboardPage() {
             const aBalance = m.pond_a?.current_balance ?? 0;
             const bRawBalance = m.pond_b?.current_balance ?? 0;
             
-            const aLevel   = calcWaterLevel(aBalance, maxBalance);
-            const bLevel   = calcWaterLevel(Math.abs(bRawBalance) + m.plannedExpenseTotal, maxBalance);
+            const incomeWaveAmount = aBalance + m.pendingIncomeTotal;
+            const expenseWaveAmount = m.plannedExpenseTotal;
+
+            const aLevel   = calcWaterLevel(incomeWaveAmount, maxBalance);
+            const bLevel   = calcWaterLevel(expenseWaveAmount, maxBalance);
             const isMe     = m.profile.id === profile?.id;
 
             return (
@@ -293,16 +304,14 @@ export default function DashboardPage() {
                       <span className="text-xs" style={{ color: 'var(--pond-a-light)', fontWeight: 600 }}>💰 收入池</span>
                     </div>
                     <WaterWave level={aLevel} variant="pond-a" height={100} />
-                    {/* 已到帳餘額 */}
+                    {/* 預估總量 */}
                     <div className="amount-display amount-small amount-pond-a" style={{ marginTop: 'var(--space-2)', textAlign: 'center' }}>
-                      {formatTWD(aBalance)}
+                      {formatTWD(incomeWaveAmount)}
                     </div>
-                    {/* 待入帳標示 */}
-                    {m.pendingIncomeTotal > 0 && (
-                      <div style={{ textAlign: 'center', marginTop: 2, fontSize: '0.72rem', color: 'var(--status-warning)', opacity: 0.85 }}>
-                        +{formatTWD(m.pendingIncomeTotal)} 待入帳
-                      </div>
-                    )}
+                    {/* 可用餘額 */}
+                    <div style={{ textAlign: 'center', marginTop: 2, fontSize: '0.72rem', color: 'var(--text-muted)', opacity: 0.85 }}>
+                      可用 {formatTWD(aBalance)}
+                    </div>
                   </div>
 
                   {/* Pond B — 支出池 */}
@@ -311,16 +320,17 @@ export default function DashboardPage() {
                       <span className="text-xs" style={{ color: 'var(--pond-b-light)', fontWeight: 600 }}>💸 支出池</span>
                     </div>
                     <WaterWave level={bLevel} variant="pond-b" height={100} />
-                    {/* 已完成支出餘額 */}
-                    <div className="amount-display amount-small amount-pond-b" style={{ marginTop: 'var(--space-2)', textAlign: 'center', color: bRawBalance < 0 ? 'var(--status-error)' : bRawBalance > 0 ? 'var(--status-success)' : undefined }}>
-                      {bRawBalance < 0 ? `-${formatTWD(Math.abs(bRawBalance))}` : bRawBalance > 0 ? `+${formatTWD(bRawBalance)}` : formatTWD(0)}
+                    {/* 計畫中支出 */}
+                    <div className="amount-display amount-small amount-pond-b" style={{ marginTop: 'var(--space-2)', textAlign: 'center' }}>
+                      {formatTWD(expenseWaveAmount)}
                     </div>
-                    {/* 計畫中支出標示 */}
-                    {m.plannedExpenseTotal > 0 && (
-                      <div style={{ textAlign: 'center', marginTop: 2, fontSize: '0.72rem', color: 'var(--status-error)', opacity: 0.85 }}>
-                        -{formatTWD(m.plannedExpenseTotal)} 計畫中
-                      </div>
-                    )}
+                    {/* 已完成與狀態 */}
+                    <div style={{ textAlign: 'center', marginTop: 2, fontSize: '0.72rem', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <span style={{ color: 'var(--status-error)', opacity: 0.85 }}>已花費 -{formatTWD(m.completedExpenseTotal)}</span>
+                      <span style={{ color: bRawBalance < 0 ? 'var(--status-error)' : bRawBalance > 0 ? 'var(--status-success)' : 'var(--text-muted)', opacity: 0.85 }}>
+                        狀態: {bRawBalance < 0 ? '🔴 欠款中' : bRawBalance > 0 ? '🟢 預付餘額' : '⚪ 收支平衡'}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
