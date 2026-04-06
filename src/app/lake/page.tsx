@@ -10,6 +10,7 @@ import { zhTW } from 'date-fns/locale';
 import { useRouter } from 'next/navigation';
 import WaterWave from '@/components/animations/WaterWave';
 import { Profile } from '@/types';
+import { LabelTooltip } from '@/components/ui/Tooltip';
 
 type ModalMode = 'add' | 'edit' | 'set-balance' | 'inject' | null;
 
@@ -352,26 +353,39 @@ export default function LakePage() {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
               <div className="form-group">
-                <label className="form-label">支出名稱</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  支出名稱
+                  <LabelTooltip text="家庭固定支出的名稱，例如：房租、水電費、網路費、保險" />
+                </label>
                 <input id="lake-form-name" type="text" className="form-input" placeholder="例：房租、水電費、保險" value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} />
               </div>
               <div className="form-group">
-                <label className="form-label">預計日期</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  預計日期
+                  <LabelTooltip text="此支出下次或本次預計從湖泊扣除的日期" />
+                </label>
                 <input id="lake-form-date" type="date" className="form-input" value={form.expected_date} onChange={e => setForm(f => ({...f, expected_date: e.target.value}))} />
               </div>
               <div className="form-group">
-                <label className="form-label">金額（台幣）</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  金額（台幣）
+                  <LabelTooltip text="每次支出的金額，將用於計算湖泊乾涸日預測" />
+                </label>
                 <input id="lake-form-amount" type="number" className="form-input" placeholder="0" value={form.amount} onChange={e => setForm(f => ({...f, amount: e.target.value}))} />
               </div>
               <div className="form-group">
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                   <input id="lake-form-recurring" type="checkbox" checked={form.is_recurring} onChange={e => setForm(f => ({...f, is_recurring: e.target.checked}))} style={{ width: 16, height: 16 }} />
                   <span className="form-label" style={{ margin: 0 }}>循環支出</span>
+                  <LabelTooltip text="勾選後可設定每月/每季/每年自動重複，用於計算未來乾涸日" />
                 </label>
               </div>
               {form.is_recurring && (
                 <div className="form-group">
-                  <label className="form-label">循環週期</label>
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                    循環週期
+                    <LabelTooltip text="選擇此支出的重複週期，系統將據此預測未來支出時間軸" />
+                  </label>
                   <select id="lake-form-rule" className="form-input form-select" value={form.recurrence_rule} onChange={e => setForm(f => ({...f, recurrence_rule: e.target.value as 'monthly' | 'quarterly' | 'yearly'}))}>
                     <option value="monthly">每月</option>
                     <option value="quarterly">每季（3個月）</option>
@@ -398,11 +412,22 @@ export default function LakePage() {
               <h3 className="modal-title">調整湖泊餘額</h3>
               <button className="btn btn-ghost btn-sm" onClick={() => setModal(null)} id="lake-balance-close">✕</button>
             </div>
-            <p className="text-secondary text-sm" style={{ marginBottom: 'var(--space-5)' }}>
-              直接設定湖泊的當前實際餘額（台幣）
+            {/* ⚠️ 警告：直接調整會繞過交易記錄 */}
+            <div className="alert" style={{ background: 'rgba(245,166,35,0.1)', border: '1px solid rgba(245,166,35,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 'var(--space-4)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <span style={{ fontSize: '1rem' }}>⚠️</span>
+              <div className="text-sm" style={{ color: 'var(--status-warning)' }}>
+                <strong>注意：</strong>直接調整餘額不會產生交易記錄，會導致餘額與歷史記錄不一致。<br />
+                <span style={{ opacity: 0.8 }}>建議改用「收入池→湖泊」轉帳功能，以保留完整稽核軌跡。</span>
+              </div>
+            </div>
+            <p className="text-secondary text-sm" style={{ marginBottom: 'var(--space-4)' }}>
+              若需更正初始餘額或修復錯誤，可直接輸入目前實際餘額（台幣）。
             </p>
             <div className="form-group" style={{ marginBottom: 'var(--space-6)' }}>
-              <label className="form-label">湖泊餘額</label>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                湖泊餘額
+                <LabelTooltip text="輸入現在湖泊的實際餘額（例如查看銀行存款後的正確數字）" />
+              </label>
               <input id="lake-balance-input" type="number" className="form-input" placeholder="0" min="0" value={newBalance} onChange={e => setNewBalance(e.target.value)} />
             </div>
             <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
@@ -425,22 +450,32 @@ export default function LakePage() {
             </div>
             <p className="text-secondary text-sm" style={{ marginBottom: 'var(--space-5)' }}>
               資金將從湖泊中扣除，並進入該成員的收入池 (Pond A)。<br/>
-              <span style={{color: 'var(--status-warning)'}}>※ 預約到帳：湖泊會立刻扣除保留款項，但該成員須在指定日期才能確認入帳。</span>
+              <span style={{color: 'var(--status-warning)'}}>※ 預約到帳：湖泊立刻扣除，成員須在指定日期確認入帳。</span>
             </p>
             <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
-              <label className="form-label">選擇接收成員</label>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                選擇接收成員
+                <LabelTooltip text="選擇要接收這筆湖泊資金的家庭成員，資金會進入該成員的收入池（池塘A）" />
+              </label>
               <select className="form-input form-select" value={injectForm.user_id} onChange={e => setInjectForm(f => ({ ...f, user_id: e.target.value }))}>
                 <option value="">-- 請選擇 --</option>
                 {members.map(m => <option key={m.id} value={m.id}>{m.display_name} ({m.role === 'admin' ? '系統管理員' : m.role === 'lake_manager' ? '湖泊管理員' : '成員'})</option>)}
               </select>
             </div>
             <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
-              <label className="form-label">調撥金額 (可用餘額: {formatTWD(lake?.current_balance ?? 0)})</label>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                調撥金額
+                <span className="text-xs text-muted" style={{ marginLeft: 8, fontWeight: 400 }}>（可用餘額：{formatTWD(lake?.current_balance ?? 0)}）</span>
+                <LabelTooltip text={`最多可調撥 ${formatTWD(lake?.current_balance ?? 0)}，不能超過湖泊現有餘額`} />
+              </label>
               <input type="number" className="form-input" placeholder="0" min="1" max={lake?.current_balance} value={injectForm.amount} onChange={e => setInjectForm(f => ({ ...f, amount: e.target.value }))} />
             </div>
             
             <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
-              <label className="form-label" style={{ marginBottom: 10 }}>到帳方式</label>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+                到帳方式
+                <LabelTooltip text="即時入帳：立即確認加入收入池。預約入帳：湖泊立刻扣款，但成員要等到指定日期才能在收入池看到這筆款項。" />
+              </label>
               <div className="flex gap-4">
                 <label className="flex items-center gap-2" style={{ cursor: 'pointer' }}>
                   <input type="radio" checked={injectForm.is_immediate} onChange={() => setInjectForm(f => ({ ...f, is_immediate: true }))} style={{ width: '1.2rem', height: '1.2rem'}} />
@@ -455,7 +490,10 @@ export default function LakePage() {
 
             {!injectForm.is_immediate && (
               <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
-                <label className="form-label">預計入帳日期</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  預計入帳日期
+                  <LabelTooltip text="成員將在此日期收到撥款通知，需自行點擊確認到帳後才會計入收入池" />
+                </label>
                 <input type="date" className="form-input" value={injectForm.expected_date} onChange={e => setInjectForm(f => ({ ...f, expected_date: e.target.value }))} />
               </div>
             )}

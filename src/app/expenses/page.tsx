@@ -7,6 +7,7 @@ import { ExpenseItem, Profile } from '@/types';
 import { formatTWD } from '@/lib/predictions';
 import { format, parseISO } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
+import { LabelTooltip } from '@/components/ui/Tooltip';
 
 type ModalMode = 'add' | 'edit' | null;
 
@@ -21,6 +22,8 @@ export default function ExpensesPage() {
   const [saving, setSaving]     = useState(false);
   const [filterUser, setFilterUser] = useState('all');
   const [members, setMembers]   = useState<Profile[]>([]);
+  // 刪除確認 modal
+  const [deleteTarget, setDeleteTarget] = useState<ExpenseItem | null>(null);
 
   const [form, setForm] = useState({
     name: '',
@@ -65,7 +68,6 @@ export default function ExpensesPage() {
     const targetUserId = form.user_id || profile.id;
 
     if (modal === 'add') {
-      // 所有新支出一律以 'planned' 狀態建立
       const { data: newItem } = await supabase.from('expense_items').insert({
         name: form.name,
         expected_date: form.expected_date,
@@ -76,7 +78,6 @@ export default function ExpensesPage() {
         status: 'planned',
       }).select().single();
 
-      // 如果選擇用湖泊資金，自動建立調撥申請並通知管理員
       if (form.source === 'lake' && newItem) {
         await supabase.from('lake_requests').insert({
           requester_id: targetUserId,
@@ -102,10 +103,6 @@ export default function ExpensesPage() {
           );
         }
       }
-      // pond_a 來源：支出建立為 planned，待使用者點擊「完成」後
-      // 觸發器 trg_expense_changed 自動更新 pond_b，
-      // 使用 transactions 記錄讓 pond_a 也自動扣除
-
     } else if (modal === 'edit' && selected) {
       await supabase.from('expense_items').update({
         name: form.name,
@@ -119,14 +116,25 @@ export default function ExpensesPage() {
     load();
   };
 
-  const handleDelete = async (id: string) => {
-    await supabase.from('expense_items').delete().eq('id', id);
+  /** 標記支出為「已完成」，觸發 fn_recalc_pond_b */
+  const handleComplete = async (item: ExpenseItem) => {
+    setSaving(true);
+    await supabase.from('expense_items').update({ status: 'completed' }).eq('id', item.id);
+    setSaving(false);
+    load();
+  };
+
+  /** 刪除確認 */
+  const confirmDelete = (item: ExpenseItem) => setDeleteTarget(item);
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    await supabase.from('expense_items').delete().eq('id', deleteTarget.id);
+    setDeleteTarget(null);
     load();
   };
 
   const filtered = items.filter(i => filterUser === 'all' || i.user_id === filterUser);
   const myItems = items.filter(i => i.user_id === profile?.id);
-  // 計畫中支出合計（planned + approved 狀態，尚未完成）
   const totalPlanned = myItems
     .filter(i => i.status === 'planned' || i.status === 'approved')
     .reduce((s, i) => s + i.amount, 0);
@@ -198,6 +206,7 @@ export default function ExpensesPage() {
             const canEdit = isMe || isAdmin;
             const sl = statusLabel[item.status] ?? statusLabel.planned;
             const src = sourceLabel[item.source] ?? sourceLabel.pond_a;
+            const canComplete = canEdit && (item.status === 'planned' || item.status === 'approved');
 
             return (
               <div key={item.id} className="card card-sm">
@@ -221,12 +230,24 @@ export default function ExpensesPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
                     <span className="amount-display amount-small amount-negative">-{formatTWD(item.amount)}</span>
                     {canEdit && (
                       <>
+                        {/* 完成按鈕：只在 planned/approved 狀態顯示 */}
+                        {canComplete && (
+                          <button
+                            className="btn btn-success btn-sm"
+                            onClick={() => handleComplete(item)}
+                            disabled={saving}
+                            id={`expense-complete-${item.id}`}
+                            title="標記為已完成，支出池餘額將同步扣除"
+                          >
+                            ✓ 完成
+                          </button>
+                        )}
                         <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)} id={`expense-edit-${item.id}`}>編輯</button>
-                        <button className="btn btn-danger btn-sm" onClick={() => handleDelete(item.id)} id={`expense-delete-${item.id}`}>刪除</button>
+                        <button className="btn btn-danger btn-sm" onClick={() => confirmDelete(item)} id={`expense-delete-${item.id}`}>刪除</button>
                       </>
                     )}
                   </div>
@@ -248,31 +269,46 @@ export default function ExpensesPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
               {isAdmin && (
                 <div className="form-group">
-                  <label className="form-label">所屬成員</label>
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                    所屬成員
+                    <LabelTooltip text="選擇此支出屬於哪位家庭成員（管理員專用）" />
+                  </label>
                   <select id="expense-form-user" className="form-input form-select" value={form.user_id} onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))}>
                     {members.map(m => <option key={m.id} value={m.id}>{m.display_name}</option>)}
                   </select>
                 </div>
               )}
               <div className="form-group">
-                <label className="form-label">支出名稱</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  支出名稱
+                  <LabelTooltip text="描述這筆支出的用途，例如：餐費、交通費、房租" />
+                </label>
                 <input id="expense-form-name" type="text" className="form-input" placeholder="例：餐費、交通費" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
               </div>
               <div className="form-group">
-                <label className="form-label">預計日期</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  預計日期
+                  <LabelTooltip text="這筆支出預計發生的日期" />
+                </label>
                 <input id="expense-form-date" type="date" className="form-input" value={form.expected_date} onChange={e => setForm(f => ({ ...f, expected_date: e.target.value }))} />
               </div>
               <div className="form-group">
-                <label className="form-label">金額（台幣）</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  金額（台幣）
+                  <LabelTooltip text="支出金額，請輸入整數（元）" />
+                </label>
                 <input id="expense-form-amount" type="number" className="form-input" placeholder="0" min="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
               </div>
               <div className="form-group">
-                <label className="form-label">資金來源</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  資金來源
+                  <LabelTooltip text="選擇資金來源：收入池（個人）或湖泊（家庭共用，需管理員批准）" />
+                </label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
                   <button id="expense-source-pond" onClick={() => setForm(f => ({ ...f, source: 'pond_a' }))} style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: `2px solid ${form.source === 'pond_a' ? 'var(--pond-a)' : 'var(--color-border)'}`, background: form.source === 'pond_a' ? 'rgba(26,158,92,0.1)' : 'transparent', cursor: 'pointer', color: 'var(--text-primary)', textAlign: 'center' }}>
                     <div style={{ fontSize: '1.3rem', marginBottom: 4 }}>💰</div>
                     <div className="text-sm font-semibold">收入池 (池塘A)</div>
-                    <div className="text-xs text-muted">立即扣除</div>
+                    <div className="text-xs text-muted">個人資金，完成後扣除</div>
                   </button>
                   <button id="expense-source-lake" onClick={() => setForm(f => ({ ...f, source: 'lake' }))} style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: `2px solid ${form.source === 'lake' ? 'var(--lake-safe)' : 'var(--color-border)'}`, background: form.source === 'lake' ? 'rgba(26,111,181,0.1)' : 'transparent', cursor: 'pointer', color: 'var(--text-primary)', textAlign: 'center' }}>
                     <div style={{ fontSize: '1.3rem', marginBottom: 4 }}>🌊</div>
@@ -283,7 +319,10 @@ export default function ExpensesPage() {
               </div>
               {form.source === 'lake' && (
                 <div className="form-group">
-                  <label className="form-label">申請原因</label>
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                    申請原因
+                    <LabelTooltip text="說明為何需要從家庭公共資金（湖泊）支付此費用" />
+                  </label>
                   <input id="expense-form-reason" type="text" className="form-input" placeholder="說明為何需要使用湖泊資金" value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} />
                 </div>
               )}
@@ -299,6 +338,29 @@ export default function ExpensesPage() {
                   {saving ? '儲存中...' : '儲存'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 刪除確認 Modal */}
+      {deleteTarget && (
+        <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+            <div className="modal-header">
+              <h3 className="modal-title">⚠️ 確認刪除</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setDeleteTarget(null)}>✕</button>
+            </div>
+            <p className="text-secondary" style={{ marginBottom: 'var(--space-2)' }}>
+              確定要刪除這筆支出記錄嗎？此操作無法復原。
+            </p>
+            <div style={{ padding: '10px 14px', background: 'rgba(224,82,82,0.08)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-6)', border: '1px solid rgba(224,82,82,0.2)' }}>
+              <span className="font-semibold">{deleteTarget.name}</span>
+              <span className="text-secondary" style={{ marginLeft: 8 }}>— {formatTWD(deleteTarget.amount)}</span>
+            </div>
+            <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)} id="expense-delete-cancel">取消</button>
+              <button className="btn btn-danger" onClick={handleDelete} id="expense-delete-confirm">確認刪除</button>
             </div>
           </div>
         </div>

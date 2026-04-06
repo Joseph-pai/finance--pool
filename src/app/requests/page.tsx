@@ -7,6 +7,7 @@ import { LakeRequest, Profile } from '@/types';
 import { formatTWD } from '@/lib/predictions';
 import { format, parseISO } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
+import { LabelTooltip } from '@/components/ui/Tooltip';
 
 export default function RequestsPage() {
   const { profile, canManageLake } = useAuth();
@@ -223,15 +224,24 @@ export default function RequestsPage() {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
               <div className="form-group">
-                <label className="form-label">批准金額（可調整）</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  批准金額（可調整）
+                  <LabelTooltip text="可以批准比申請少的金額，調整後的金額將直接撥入申請人的支出池。" />
+                </label>
                 <input id="req-review-amount" type="number" className="form-input" value={reviewForm.approved_amount} onChange={e => setReviewForm(f => ({ ...f, approved_amount: e.target.value }))} />
               </div>
               <div className="form-group">
-                <label className="form-label">到帳日期</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  到帳日期
+                  <LabelTooltip text="資金預計從湖泊撥出的日期，此日期將出現在交易記錄中" />
+                </label>
                 <input id="req-review-date" type="date" className="form-input" value={reviewForm.approved_date} onChange={e => setReviewForm(f => ({ ...f, approved_date: e.target.value }))} />
               </div>
               <div className="form-group">
-                <label className="form-label">備註（可選）</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  備註（可選）
+                  <LabelTooltip text="填寫批准或拒絕的原因，申請人將收到包含此備註的通知" />
+                </label>
                 <input id="req-review-note" type="text" className="form-input" placeholder="批准/拒絕原因" value={reviewForm.admin_note} onChange={e => setReviewForm(f => ({ ...f, admin_note: e.target.value }))} />
               </div>
               <div className="flex gap-3" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>

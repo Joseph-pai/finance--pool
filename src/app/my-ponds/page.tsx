@@ -9,6 +9,7 @@ import WaterWave from '@/components/animations/WaterWave';
 import { format, parseISO } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
 import { useRouter } from 'next/navigation';
+import { LabelTooltip } from '@/components/ui/Tooltip';
 
 export default function MyPondsPage() {
   const { profile } = useAuth();
@@ -252,6 +253,13 @@ export default function MyPondsPage() {
             <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(124,58,237,0.3)' }}>
               <WaterWave level={bLevel} variant="pond-b" height={180} label="💸 支出池 (池塘B)" amount={pondBDisplayStr} />
               <div style={{ padding: 'var(--space-5)' }}>
+                {/* Pond B 語意說明 */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 'var(--space-3)', padding: '6px 10px', background: pondBBalance < 0 ? 'rgba(224,82,82,0.08)' : pondBBalance > 0 ? 'rgba(26,158,92,0.08)' : 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-sm)', border: `1px solid ${pondBBalance < 0 ? 'rgba(224,82,82,0.2)' : pondBBalance > 0 ? 'rgba(26,158,92,0.2)' : 'var(--color-border)'}` }}>
+                  <span style={{ fontSize: '0.72rem', color: pondBBalance < 0 ? 'var(--status-error)' : pondBBalance > 0 ? 'var(--status-success)' : 'var(--text-muted)' }}>
+                    {pondBBalance < 0 ? '🔴 欠款中（已支出尚未注水）' : pondBBalance > 0 ? '🟢 有預付餘額（可退回）' : '⚪ 收支平衡'}
+                  </span>
+                  <LabelTooltip text="支出池餘額：負值代表已完成的支出總額，可透過注水來補足；正值代表預先注入但尚未花用，可退回收入池或湖泊。" />
+                </div>
                 {/* 計畫中支出提示 */}
                 {plannedExpenseTotal > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)', padding: '8px 12px', background: 'rgba(224,82,82,0.1)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(224,82,82,0.25)' }}>
@@ -419,7 +427,11 @@ export default function MyPondsPage() {
               </div>
             </div>
             <div className="form-group" style={{ marginBottom: 'var(--space-6)' }}>
-              <label className="form-label">注入金額</label>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                注入金額
+                <span className="text-xs text-muted" style={{ marginLeft: 8, fontWeight: 400 }}>（最多 {formatTWD(pondABalance)}）</span>
+                <LabelTooltip text={`從收入池轉入支出池，最多可注入 ${formatTWD(pondABalance)}。注入後支出池餘額會增加，可用於支付支出。`} />
+              </label>
               <input type="number" className="form-input" placeholder="0" max={pondABalance} value={injectAmount} onChange={e => setInjectAmount(e.target.value)} autoFocus />
             </div>
             <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
@@ -447,7 +459,11 @@ export default function MyPondsPage() {
               </div>
             </div>
             <div className="form-group" style={{ marginBottom: 'var(--space-6)' }}>
-              <label className="form-label">注入金額</label>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                注入金額
+                <span className="text-xs text-muted" style={{ marginLeft: 8, fontWeight: 400 }}>（最多 {formatTWD(pondABalance)}）</span>
+                <LabelTooltip text={`從個人收入池注入家庭公共湖泊，最多可注入 ${formatTWD(pondABalance)}。此操作不可撤銷，注入後由管理員統一調配。`} />
+              </label>
               <input type="number" className="form-input" placeholder="0" max={pondABalance} value={injectLakeAmount} onChange={e => setInjectLakeAmount(e.target.value)} autoFocus />
             </div>
             <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
@@ -475,14 +491,21 @@ export default function MyPondsPage() {
               </div>
             </div>
             <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
-              <label className="form-label">退回目標</label>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                退回目標
+                <LabelTooltip text="選擇將多餘資金退回到收入池（個人使用）或湖泊（家庭公用）" />
+              </label>
               <select className="form-input" value={refundTarget} onChange={e => setRefundTarget(e.target.value as 'lake' | 'pond_a')}>
                 <option value="pond_a">💰 我的收入池 (池塘 A)</option>
                 <option value="lake">🌊 家庭湖泊</option>
               </select>
             </div>
             <div className="form-group" style={{ marginBottom: 'var(--space-6)' }}>
-              <label className="form-label">退回金額</label>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                退回金額
+                <span className="text-xs text-muted" style={{ marginLeft: 8, fontWeight: 400 }}>（最多 {formatTWD(pondBBalance)}）</span>
+                <LabelTooltip text={`支出池目前有 ${formatTWD(pondBBalance)} 預付餘額，全部或部分可退回至所選目標`} />
+              </label>
               <input type="number" className="form-input" placeholder="0" max={pondBBalance} value={refundAmount} onChange={e => setRefundAmount(e.target.value)} autoFocus />
             </div>
             <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>

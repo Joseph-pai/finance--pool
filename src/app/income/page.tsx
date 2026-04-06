@@ -7,6 +7,7 @@ import { IncomeItem, Profile, PondA } from '@/types';
 import { formatTWD } from '@/lib/predictions';
 import { format, isAfter, parseISO } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
+import { LabelTooltip } from '@/components/ui/Tooltip';
 
 type ModalMode = 'add' | 'edit' | 'confirm' | null;
 
@@ -22,12 +23,13 @@ export default function IncomePage() {
   const [saving, setSaving]       = useState(false);
   const [filterUser, setFilterUser] = useState<string>('all');
   const [members, setMembers]     = useState<Profile[]>([]);
+  // 刪除確認 modal
+  const [deleteTarget, setDeleteTarget] = useState<IncomeItem | null>(null);
 
   // Form state
   const [form, setForm] = useState({ name: '', expected_date: '', amount: '', user_id: '' });
   const [transferAmount, setTransferAmount] = useState('');
   const [confirmActual, setConfirmActual] = useState('');
-  // 追蹤目前正在操作哪一個 item 的輸入框（避免多列共用 state 混淆）
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -87,7 +89,6 @@ export default function IncomePage() {
     const actualAmount = Number(confirmActual);
 
     if (confirmed) {
-      // 狀態更新與金額紀錄 (其餘由資料庫觸發器同步至 pond_a)
       await supabase.from('income_items').update({
         status: 'confirmed',
         actual_amount: actualAmount,
@@ -104,6 +105,12 @@ export default function IncomePage() {
   const handleTransferToLake = async (item: IncomeItem) => {
     const amt = Number(transferAmount);
     if (!amt || !profile) return;
+    // ✅ 修復：驗證金額不超過 pond_a 餘額
+    const pondABalance = pondA?.current_balance ?? 0;
+    if (amt > pondABalance) {
+      alert(`注入金額（${formatTWD(amt)}）不能超過收入池餘額（${formatTWD(pondABalance)}）`);
+      return;
+    }
     setSaving(true);
 
     try {
@@ -117,9 +124,7 @@ export default function IncomePage() {
         note: `注入湖泊：${item.name}`,
         transaction_date: new Date().toISOString().substring(0, 10),
       });
-      if (error) {
-        throw new Error(error.message);
-      }
+      if (error) throw new Error(error.message);
     } catch (err: any) {
       alert('系統錯誤：' + err.message);
       console.error('注入湖泊失敗：', err);
@@ -130,10 +135,15 @@ export default function IncomePage() {
     load();
   };
 
-  // 注入支出池（從已到帳收入直接撥至個人支出池）
   const handleTransferToPondBFromIncome = async (item: IncomeItem) => {
     const amt = Number(transferAmount);
     if (!amt || !profile) return;
+    // ✅ 修復：驗證金額不超過 pond_a 餘額
+    const pondABalance = pondA?.current_balance ?? 0;
+    if (amt > pondABalance) {
+      alert(`注入金額（${formatTWD(amt)}）不能超過收入池餘額（${formatTWD(pondABalance)}）`);
+      return;
+    }
     setSaving(true);
     try {
       const { error } = await supabase.from('transactions').insert({
@@ -146,9 +156,7 @@ export default function IncomePage() {
         note: `注入支出池：${item.name}`,
         transaction_date: new Date().toISOString().substring(0, 10),
       });
-      if (error) {
-        throw new Error(error.message);
-      }
+      if (error) throw new Error(error.message);
     } catch (err: any) {
       alert('系統錯誤：' + err.message);
       console.error('注入支出池失敗：', err);
@@ -159,8 +167,12 @@ export default function IncomePage() {
     load();
   };
 
-  const handleDelete = async (id: string) => {
-    await supabase.from('income_items').delete().eq('id', id);
+  /** 刪除確認 */
+  const confirmDelete = (item: IncomeItem) => setDeleteTarget(item);
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    await supabase.from('income_items').delete().eq('id', deleteTarget.id);
+    setDeleteTarget(null);
     load();
   };
 
@@ -168,6 +180,7 @@ export default function IncomePage() {
   const myItems = items.filter(i => i.user_id === profile?.id);
   const totalPending = myItems.filter(i => i.status === 'pending').reduce((s, i) => s + i.amount, 0);
   const totalConfirmed = myItems.filter(i => i.status === 'confirmed').reduce((s, i) => s + (i.actual_amount ?? i.amount), 0);
+  const pondABalance = pondA?.current_balance ?? 0;
 
   const statusLabel: Record<string, { text: string; badge: string }> = {
     pending:   { text: '待確認', badge: 'badge-warning' },
@@ -194,7 +207,7 @@ export default function IncomePage() {
         </div>
         <div className="card card-sm" style={{ borderColor: 'rgba(26,111,181,0.4)', background: 'rgba(26,111,181,0.06)' }}>
           <p className="text-xs text-muted" style={{ marginBottom: 4 }}>池塘A 剩餘餘額</p>
-          <p className="amount-display amount-medium" style={{ color: 'var(--text-accent)' }}>{formatTWD(pondA?.current_balance ?? 0)}</p>
+          <p className="amount-display amount-medium" style={{ color: 'var(--text-accent)' }}>{formatTWD(pondABalance)}</p>
           <p className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 2 }}>（已確認 - 已轉出）</p>
         </div>
         <div className="card card-sm">
@@ -216,7 +229,7 @@ export default function IncomePage() {
         </button>
       </div>
 
-      {/* Income Table */}
+      {/* Income List */}
       {loading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
           {[1,2,3].map(i => <div key={i} className="skeleton" style={{ height: 60, borderRadius: 'var(--radius-md)' }} />)}
@@ -259,7 +272,6 @@ export default function IncomePage() {
                   <div className="flex items-center gap-3">
                     <span className="amount-display amount-small amount-pond-a">{formatTWD(item.amount)}</span>
 
-                    {/* Actions — only for own items */}
                     {canEdit && (
                       <>
                         {item.status === 'pending' && (
@@ -269,19 +281,25 @@ export default function IncomePage() {
                         )}
                         {item.status === 'confirmed' && (
                           <div className="flex items-center gap-2 flex-wrap">
-                            <input
-                              type="number"
-                              className="form-input"
-                              style={{ width: 90, padding: '4px 8px', fontSize: '0.85rem' }}
-                              placeholder="金額"
-                              value={activeItemId === item.id ? transferAmount : ''}
-                              onFocus={() => {
-                                setActiveItemId(item.id);
-                                setTransferAmount('');
-                              }}
-                              onChange={e => setTransferAmount(e.target.value)}
-                              id={`income-transfer-input-${item.id}`}
-                            />
+                            <div style={{ position: 'relative' }}>
+                              <input
+                                type="number"
+                                className="form-input"
+                                style={{ width: 90, padding: '4px 8px', fontSize: '0.85rem' }}
+                                placeholder="金額"
+                                title={`最多可轉出：${formatTWD(pondABalance)}`}
+                                value={activeItemId === item.id ? transferAmount : ''}
+                                onFocus={() => {
+                                  setActiveItemId(item.id);
+                                  setTransferAmount('');
+                                }}
+                                onChange={e => setTransferAmount(e.target.value)}
+                                id={`income-transfer-input-${item.id}`}
+                              />
+                            </div>
+                            <span className="text-xs text-muted" style={{ fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
+                              可用 {formatTWD(pondABalance)}
+                            </span>
                             <button
                               className="btn btn-primary btn-sm"
                               onClick={() => { setActiveItemId(item.id); handleTransferToLake(item); }}
@@ -302,7 +320,7 @@ export default function IncomePage() {
                           </div>
                         )}
                         <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)} id={`income-edit-${item.id}`}>編輯</button>
-                        <button className="btn btn-danger btn-sm" onClick={() => handleDelete(item.id)} id={`income-delete-${item.id}`}>刪除</button>
+                        <button className="btn btn-danger btn-sm" onClick={() => confirmDelete(item)} id={`income-delete-${item.id}`}>刪除</button>
                       </>
                     )}
                   </div>
@@ -324,22 +342,34 @@ export default function IncomePage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
               {isAdmin && (
                 <div className="form-group">
-                  <label className="form-label">所屬成員</label>
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                    所屬成員
+                    <LabelTooltip text="選擇此收入屬於哪位家庭成員（管理員專用）" />
+                  </label>
                   <select id="income-form-user" className="form-input form-select" value={form.user_id} onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))}>
                     {members.map(m => <option key={m.id} value={m.id}>{m.display_name}</option>)}
                   </select>
                 </div>
               )}
               <div className="form-group">
-                <label className="form-label">收入名稱</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  收入名稱
+                  <LabelTooltip text="描述這筆收入的來源，例如：薪資、獎金、兼職收入" />
+                </label>
                 <input id="income-form-name" type="text" className="form-input" placeholder="例：薪資、獎金" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
               </div>
               <div className="form-group">
-                <label className="form-label">預計到帳日期</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  預計到帳日期
+                  <LabelTooltip text="這筆收入預計匯入帳戶的日期，到帳後需回來點擊「確認到帳」" />
+                </label>
                 <input id="income-form-date" type="date" className="form-input" value={form.expected_date} onChange={e => setForm(f => ({ ...f, expected_date: e.target.value }))} />
               </div>
               <div className="form-group">
-                <label className="form-label">金額（台幣）</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                  金額（台幣）
+                  <LabelTooltip text="預計收入金額，確認到帳時可填寫實際到帳金額（可能與預計不同）" />
+                </label>
                 <input id="income-form-amount" type="number" className="form-input" placeholder="0" min="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
               </div>
               <div className="flex gap-3" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
@@ -365,7 +395,10 @@ export default function IncomePage() {
               「{selected.name}」是否實際到帳？
             </p>
             <div className="form-group" style={{ marginBottom: 'var(--space-6)' }}>
-              <label className="form-label">實際到帳金額</label>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                實際到帳金額
+                <LabelTooltip text="請填入實際匯入帳戶的金額（可能與原預計不同），確認後將自動加入收入池" />
+              </label>
               <input id="income-confirm-amount" type="number" className="form-input" value={confirmActual} onChange={e => setConfirmActual(e.target.value)} />
             </div>
             <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
@@ -375,6 +408,29 @@ export default function IncomePage() {
               <button className="btn btn-success" onClick={() => handleConfirmIncome(true)} disabled={saving || !confirmActual} id="income-confirm-yes">
                 ✓ 已到帳，加入池塘
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 刪除確認 Modal */}
+      {deleteTarget && (
+        <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+            <div className="modal-header">
+              <h3 className="modal-title">⚠️ 確認刪除</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setDeleteTarget(null)}>✕</button>
+            </div>
+            <p className="text-secondary" style={{ marginBottom: 'var(--space-2)' }}>
+              確定要刪除這筆收入記錄嗎？若已確認到帳，收入池餘額將同步重算。
+            </p>
+            <div style={{ padding: '10px 14px', background: 'rgba(224,82,82,0.08)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-6)', border: '1px solid rgba(224,82,82,0.2)' }}>
+              <span className="font-semibold">{deleteTarget.name}</span>
+              <span className="text-secondary" style={{ marginLeft: 8 }}>— {formatTWD(deleteTarget.amount)}</span>
+            </div>
+            <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)} id="income-delete-cancel">取消</button>
+              <button className="btn btn-danger" onClick={handleDelete} id="income-delete-confirm">確認刪除</button>
             </div>
           </div>
         </div>
