@@ -107,10 +107,7 @@ export default function IncomePage() {
     setSaving(true);
 
     try {
-      // 只插入交易記錄；資料庫觸發器 (005_fix_all_logic) 自動同步：
-      //   fn_recalc_pond_a → 扣減 pond_a
-      //   fn_recalc_lake   → 增加 lake
-      await supabase.from('transactions').insert({
+      const { error } = await supabase.from('transactions').insert({
         family_id: profile.family_id,
         user_id: item.user_id,
         type: 'transfer_to_lake',
@@ -120,7 +117,12 @@ export default function IncomePage() {
         note: `注入湖泊：${item.name}`,
         transaction_date: new Date().toISOString().substring(0, 10),
       });
-    } catch (err) {
+      if (error) {
+        alert('無法注入湖泊：' + error.message);
+        console.error('注入湖泊 API 錯誤：', error);
+      }
+    } catch (err: any) {
+      alert('系統錯誤：' + err.message);
       console.error('注入湖泊失敗：', err);
     }
 
@@ -135,7 +137,7 @@ export default function IncomePage() {
     if (!amt || !profile) return;
     setSaving(true);
     try {
-      await supabase.from('transactions').insert({
+      const { error } = await supabase.from('transactions').insert({
         family_id: profile.family_id,
         user_id: item.user_id,
         type: 'transfer_to_pond_b',
@@ -145,7 +147,12 @@ export default function IncomePage() {
         note: `注入支出池：${item.name}`,
         transaction_date: new Date().toISOString().substring(0, 10),
       });
-    } catch (err) {
+      if (error) {
+        alert('無法注入支出池：' + error.message);
+        console.error('注入支出池 API 錯誤：', error);
+      }
+    } catch (err: any) {
+      alert('系統錯誤：' + err.message);
       console.error('注入支出池失敗：', err);
     }
     setTransferAmount('');
