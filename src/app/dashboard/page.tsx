@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
 import WaterWave from '@/components/animations/WaterWave';
 import { formatTWD, calcWaterLevel, calculateLakeDryDate } from '@/lib/predictions';
-import { Lake, PondA, PondB, Profile, LakeExpense, LakeRequest, DryPrediction, ExpenseItem } from '@/types';
+import { Lake, PondA, PondB, Profile, LakeExpense, LakeRequest, DryPrediction, ExpenseItem, IncomeItem } from '@/types';
 import { format } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
 
@@ -14,7 +14,10 @@ interface MemberData {
   profile: Profile;
   pond_a: PondA | null;
   pond_b: PondB | null;
-  totalExpense: number;
+  /** 待入帳的預計收入合計（pending 狀態） */
+  pendingIncomeTotal: number;
+  /** 計畫中尚未完成的支出合計（planned + approved 狀態） */
+  plannedExpenseTotal: number;
 }
 
 export default function DashboardPage() {
@@ -22,18 +25,18 @@ export default function DashboardPage() {
   const router = useRouter();
   const supabase = createClient();
 
-  const [lake, setLake]           = useState<Lake | null>(null);
-  const [members, setMembers]     = useState<MemberData[]>([]);
+  const [lake, setLake]                 = useState<Lake | null>(null);
+  const [members, setMembers]           = useState<MemberData[]>([]);
   const [lakeExpenses, setLakeExpenses] = useState<LakeExpense[]>([]);
-  const [prediction, setPrediction] = useState<DryPrediction | null>(null);
-  const [loading, setLoading]     = useState(true);
-  const [maxBalance, setMaxBalance] = useState(1);
+  const [prediction, setPrediction]     = useState<DryPrediction | null>(null);
+  const [loading, setLoading]           = useState(true);
+  const [maxBalance, setMaxBalance]     = useState(1);
 
   const loadDashboard = useCallback(async () => {
     if (!profile?.family_id) return;
     setLoading(true);
 
-    const [lakeRes, profilesRes, pondARes, pondBRes, lakeExpRes, requestsRes, expenseItemsRes] = await Promise.all([
+    const [lakeRes, profilesRes, pondARes, pondBRes, lakeExpRes, requestsRes, expenseItemsRes, incomeItemsRes] = await Promise.all([
       supabase.from('lake').select('*').eq('family_id', profile.family_id).single(),
       supabase.from('profiles').select('*').eq('family_id', profile.family_id),
       supabase.from('pond_a').select('*').eq('family_id', profile.family_id),
@@ -41,27 +44,41 @@ export default function DashboardPage() {
       supabase.from('lake_expenses').select('*').eq('family_id', profile.family_id).eq('status', 'active'),
       supabase.from('lake_requests').select('*').eq('family_id', profile.family_id).eq('status', 'approved'),
       supabase.from('expense_items').select('*').eq('family_id', profile.family_id),
+      supabase.from('income_items').select('*').eq('family_id', profile.family_id),
     ]);
 
-    const lakeData = lakeRes.data as Lake | null;
-    const profilesData = (profilesRes.data ?? []) as Profile[];
-    const pondAData = (pondARes.data ?? []) as PondA[];
-    const pondBData = (pondBRes.data ?? []) as PondB[];
-    const expensesData = (lakeExpRes.data ?? []) as LakeExpense[];
-    const requestsData = (requestsRes.data ?? []) as LakeRequest[];
-    const allExpenses = (expenseItemsRes.data ?? []) as ExpenseItem[];
+    const lakeData      = lakeRes.data as Lake | null;
+    const profilesData  = (profilesRes.data ?? []) as Profile[];
+    const pondAData     = (pondARes.data ?? []) as PondA[];
+    const pondBData     = (pondBRes.data ?? []) as PondB[];
+    const expensesData  = (lakeExpRes.data ?? []) as LakeExpense[];
+    const requestsData  = (requestsRes.data ?? []) as LakeRequest[];
+    const allExpenses   = (expenseItemsRes.data ?? []) as ExpenseItem[];
+    const allIncomes    = (incomeItemsRes.data ?? []) as IncomeItem[];
 
     setLake(lakeData);
     setLakeExpenses(expensesData);
 
     const memberList: MemberData[] = profilesData.map((p) => {
+      const pIncomes  = allIncomes.filter(i => i.user_id === p.id);
       const pExpenses = allExpenses.filter(e => e.user_id === p.id);
-      const sum = pExpenses.reduce((acc, curr) => acc + curr.amount, 0);
+
+      // 待入帳（pending）收入合計
+      const pendingIncomeTotal = pIncomes
+        .filter(i => i.status === 'pending')
+        .reduce((acc, i) => acc + i.amount, 0);
+
+      // 計畫中支出合計（planned + approved，不含 completed 和 rejected）
+      const plannedExpenseTotal = pExpenses
+        .filter(e => e.status === 'planned' || e.status === 'approved')
+        .reduce((acc, e) => acc + e.amount, 0);
+
       return {
         profile: p,
         pond_a: pondAData.find(a => a.user_id === p.id) ?? null,
         pond_b: pondBData.find(b => b.user_id === p.id) ?? null,
-        totalExpense: sum,
+        pendingIncomeTotal,
+        plannedExpenseTotal,
       };
     });
     setMembers(memberList);
@@ -72,10 +89,10 @@ export default function DashboardPage() {
       setPrediction(pred);
     }
 
-    // 計算最大參考水位（湖泊 + 所有池塘A之和 + 最大支出之一）
-    const totalA = pondAData.reduce((sum, p) => sum + p.current_balance, 0);
-    const maxB = Math.max(0, ...memberList.map(m => m.totalExpense));
-    const mx = Math.max(lakeData?.current_balance ?? 0, totalA, maxB, 1);
+    // 計算最大參考水位：取所有池塘 A 的最大值和湖泊餘額的最大值
+    const maxA = Math.max(0, ...pondAData.map(a => a.current_balance));
+    const maxB = Math.max(0, ...pondBData.map(b => Math.abs(b.current_balance)));
+    const mx = Math.max(lakeData?.current_balance ?? 0, maxA, maxB, 1);
     setMaxBalance(mx * 1.3);
 
     setLoading(false);
@@ -92,24 +109,26 @@ export default function DashboardPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lake', filter: `family_id=eq.${profile.family_id}` }, loadDashboard)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pond_a', filter: `family_id=eq.${profile.family_id}` }, loadDashboard)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pond_b', filter: `family_id=eq.${profile.family_id}` }, loadDashboard)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'income_items', filter: `family_id=eq.${profile.family_id}` }, loadDashboard)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expense_items', filter: `family_id=eq.${profile.family_id}` }, loadDashboard)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [profile?.family_id, supabase, loadDashboard]);
 
   const warningLevel = prediction?.warning_level ?? 'safe';
-  const lakeLevel = lake ? calcWaterLevel(lake.current_balance, maxBalance) : 0;
+  const lakeLevel    = lake ? calcWaterLevel(lake.current_balance, maxBalance) : 0;
 
   const warningColors: Record<string, string> = {
-    safe: 'var(--status-success)',
-    warning: 'var(--status-warning)',
-    danger: 'var(--lake-danger)',
+    safe:     'var(--status-success)',
+    warning:  'var(--status-warning)',
+    danger:   'var(--lake-danger)',
     critical: 'var(--status-error)',
   };
 
   const warningLabels: Record<string, string> = {
-    safe: '💧 水量充足',
-    warning: '⚠️ 注意水量',
-    danger: '🔶 水量不足',
+    safe:     '💧 水量充足',
+    warning:  '⚠️ 注意水量',
+    danger:   '🔶 水量不足',
     critical: '🚨 即將乾涸',
   };
 
@@ -228,9 +247,11 @@ export default function DashboardPage() {
         </h2>
         <div style={{ display: 'grid', gap: 'var(--space-5)', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
           {members.map((m) => {
-            const aLevel = calcWaterLevel(m.pond_a?.current_balance ?? 0, maxBalance);
-            const bLevel = calcWaterLevel(m.totalExpense, maxBalance);
-            const isMe = m.profile.id === profile?.id;
+            const aBalance = m.pond_a?.current_balance ?? 0;
+            const bBalance = Math.abs(m.pond_b?.current_balance ?? 0);
+            const aLevel   = calcWaterLevel(aBalance, maxBalance);
+            const bLevel   = calcWaterLevel(bBalance + m.plannedExpenseTotal, maxBalance);
+            const isMe     = m.profile.id === profile?.id;
 
             return (
               <div key={m.profile.id} className="card" style={{ border: isMe ? '1px solid rgba(26,111,181,0.4)' : undefined }}>
@@ -251,7 +272,7 @@ export default function DashboardPage() {
                         {isMe && <span className="badge badge-info" style={{ marginLeft: 8, fontSize: '0.65rem' }}>我</span>}
                       </div>
                       <div className="text-xs text-muted">
-                        {m.profile.role === 'admin' ? '🛡️ 系統管理員' : 
+                        {m.profile.role === 'admin' ? '🛡️ 系統管理員' :
                          m.profile.role === 'lake_manager' ? '🌊 湖泊管理員' : '👤 家庭成員'}
                       </div>
                     </div>
@@ -265,27 +286,40 @@ export default function DashboardPage() {
 
                 {/* Two ponds */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
-                  {/* Pond A */}
+                  {/* Pond A — 收入池 */}
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
                       <span className="text-xs" style={{ color: 'var(--pond-a-light)', fontWeight: 600 }}>💰 收入池</span>
                     </div>
                     <WaterWave level={aLevel} variant="pond-a" height={100} />
+                    {/* 已到帳餘額 */}
                     <div className="amount-display amount-small amount-pond-a" style={{ marginTop: 'var(--space-2)', textAlign: 'center' }}>
-                      {formatTWD(m.pond_a?.current_balance ?? 0)}
+                      {formatTWD(aBalance)}
                     </div>
+                    {/* 待入帳標示 */}
+                    {m.pendingIncomeTotal > 0 && (
+                      <div style={{ textAlign: 'center', marginTop: 2, fontSize: '0.72rem', color: 'var(--status-warning)', opacity: 0.85 }}>
+                        +{formatTWD(m.pendingIncomeTotal)} 待入帳
+                      </div>
+                    )}
                   </div>
-  
-                  {/* Pond B */}
+
+                  {/* Pond B — 支出池 */}
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
                       <span className="text-xs" style={{ color: 'var(--pond-b-light)', fontWeight: 600 }}>💸 支出池</span>
                     </div>
-                    {/* 使用資料庫確切餘額顯示水位與金額 */}
-                    <WaterWave level={calcWaterLevel(Math.abs(m.pond_b?.current_balance ?? 0), maxBalance)} variant="pond-b" height={100} />
+                    <WaterWave level={bLevel} variant="pond-b" height={100} />
+                    {/* 已完成支出餘額 */}
                     <div className="amount-display amount-small amount-pond-b" style={{ marginTop: 'var(--space-2)', textAlign: 'center' }}>
-                      {formatTWD(m.pond_b?.current_balance ?? 0)}
+                      {bBalance > 0 ? `-${formatTWD(bBalance)}` : formatTWD(0)}
                     </div>
+                    {/* 計畫中支出標示 */}
+                    {m.plannedExpenseTotal > 0 && (
+                      <div style={{ textAlign: 'center', marginTop: 2, fontSize: '0.72rem', color: 'var(--status-error)', opacity: 0.85 }}>
+                        -{formatTWD(m.plannedExpenseTotal)} 計畫中
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

@@ -65,6 +65,7 @@ export default function ExpensesPage() {
     const targetUserId = form.user_id || profile.id;
 
     if (modal === 'add') {
+      // 所有新支出一律以 'planned' 狀態建立
       const { data: newItem } = await supabase.from('expense_items').insert({
         name: form.name,
         expected_date: form.expected_date,
@@ -72,10 +73,10 @@ export default function ExpensesPage() {
         source: form.source,
         family_id: profile.family_id,
         user_id: targetUserId,
-        status: form.source === 'lake' ? 'planned' : 'planned',
+        status: 'planned',
       }).select().single();
 
-      // 如果選擇用湖泊資金，自動建立申請
+      // 如果選擇用湖泊資金，自動建立調撥申請並通知管理員
       if (form.source === 'lake' && newItem) {
         await supabase.from('lake_requests').insert({
           requester_id: targetUserId,
@@ -87,7 +88,6 @@ export default function ExpensesPage() {
           status: 'pending',
         });
 
-        // 發送通知給管理員 (系統管理員與湖泊管理員)
         const { data: managers } = await supabase.from('profiles').select('id').eq('family_id', profile.family_id).in('role', ['admin', 'lake_manager']);
         if (managers && managers.length > 0) {
           await supabase.from('notifications').insert(
@@ -96,22 +96,16 @@ export default function ExpensesPage() {
               family_id: profile.family_id,
               type: 'lake_request',
               title: '新的湖泊調撥申請',
-              message: `${profile.display_name} 代為申請使用湖泊資金 ${formatTWD(Number(form.amount))} 用於「${form.name}」`,
+              message: `${profile.display_name} 申請使用湖泊資金 ${formatTWD(Number(form.amount))} 用於「${form.name}」`,
               reference_id: newItem.id,
             }))
           );
         }
-      } else if (form.source === 'pond_a' && newItem) {
-        // 直接更新狀態，其餘由資料庫觸發器同步至 pond_a 與 pond_b
-        await supabase.from('expense_items').update({ status: 'completed' }).eq('id', newItem.id);
-        
-        await supabase.from('transactions').insert({
-          family_id: profile.family_id, user_id: targetUserId,
-          type: 'expense', amount: Number(form.amount),
-          source: 'pond_a', reference_id: newItem.id,
-          note: form.name, transaction_date: form.expected_date,
-        });
       }
+      // pond_a 來源：支出建立為 planned，待使用者點擊「完成」後
+      // 觸發器 trg_expense_changed 自動更新 pond_b，
+      // 使用 transactions 記錄讓 pond_a 也自動扣除
+
     } else if (modal === 'edit' && selected) {
       await supabase.from('expense_items').update({
         name: form.name,
@@ -132,7 +126,13 @@ export default function ExpensesPage() {
 
   const filtered = items.filter(i => filterUser === 'all' || i.user_id === filterUser);
   const myItems = items.filter(i => i.user_id === profile?.id);
-  const totalPlanned = myItems.filter(i => i.status === 'planned').reduce((s, i) => s + i.amount, 0);
+  // 計畫中支出合計（planned + approved 狀態，尚未完成）
+  const totalPlanned = myItems
+    .filter(i => i.status === 'planned' || i.status === 'approved')
+    .reduce((s, i) => s + i.amount, 0);
+  const totalCompleted = myItems
+    .filter(i => i.status === 'completed')
+    .reduce((s, i) => s + i.amount, 0);
 
   const statusLabel: Record<string, { text: string; badge: string }> = {
     planned:   { text: '計劃中', badge: 'badge-info' },
@@ -156,8 +156,12 @@ export default function ExpensesPage() {
       {/* Summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-8)' }}>
         <div className="card card-sm" style={{ borderColor: 'rgba(124,58,237,0.3)' }}>
-          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>計劃支出合計</p>
+          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>計畫中（含待批）</p>
           <p className="amount-display amount-medium amount-pond-b">{formatTWD(totalPlanned)}</p>
+        </div>
+        <div className="card card-sm" style={{ borderColor: 'rgba(26,158,92,0.2)' }}>
+          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>已完成支出</p>
+          <p className="amount-display amount-medium" style={{ color: 'var(--status-success)' }}>{formatTWD(totalCompleted)}</p>
         </div>
         <div className="card card-sm">
           <p className="text-xs text-muted" style={{ marginBottom: 4 }}>支出筆數</p>

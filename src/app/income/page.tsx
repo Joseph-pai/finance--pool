@@ -101,25 +101,23 @@ export default function IncomePage() {
     if (!amt || !profile) return;
     setSaving(true);
 
-    const targetUserId = item.user_id;
-    // 扣減 pond_a
-    const { data: pondA } = await supabase.from('pond_a').select('current_balance').eq('user_id', targetUserId).single();
-    const newPondA = Math.max(0, (pondA?.current_balance ?? 0) - amt);
-    await supabase.from('pond_a').update({ current_balance: newPondA }).eq('user_id', targetUserId);
-
-    // 增加 lake
-    const { data: lake } = await supabase.from('lake').select('current_balance, id').eq('family_id', profile.family_id).single();
-    const newLake = (lake?.current_balance ?? 0) + amt;
-    await supabase.from('lake').update({ current_balance: newLake }).eq('id', lake?.id);
-
-    // 記錄交易
-    await supabase.from('transactions').insert({
-      family_id: profile.family_id, user_id: targetUserId,
-      type: 'transfer_to_lake', amount: amt,
-      source: 'pond_a', destination: 'lake',
-      note: `注入湖泊：${item.name}`,
-      transaction_date: new Date().toISOString().substring(0, 10),
-    });
+    try {
+      // 只插入交易記錄；資料庫觸發器 (005_fix_all_logic) 自動同步：
+      //   fn_recalc_pond_a → 扣減 pond_a
+      //   fn_recalc_lake   → 增加 lake
+      await supabase.from('transactions').insert({
+        family_id: profile.family_id,
+        user_id: item.user_id,
+        type: 'transfer_to_lake',
+        amount: amt,
+        source: 'pond_a',
+        destination: 'lake',
+        note: `注入湖泊：${item.name}`,
+        transaction_date: new Date().toISOString().substring(0, 10),
+      });
+    } catch (err) {
+      console.error('注入湖泊失敗：', err);
+    }
 
     setTransferAmount('');
     setSaving(false);
