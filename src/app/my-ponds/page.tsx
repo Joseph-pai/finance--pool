@@ -78,9 +78,14 @@ export default function MyPondsPage() {
     .filter(e => e.status === 'planned' || e.status === 'approved')
     .reduce((sum, e) => sum + e.amount, 0);
 
-  // 方案 A：收入池與支出池顯示預估全貌
+  // 已完成支出（completed 狀態）
+  const completedExpenseTotal = expenses
+    .filter(e => e.status === 'completed')
+    .reduce((sum, e) => sum + e.amount, 0);
+
+  // 方案 A：收入池顯示預估全貌，支出池大圖顯示計畫中的數值
   const incomeWaveAmount  = pondABalance + pendingIncomeTotal;
-  const expenseWaveAmount = plannedExpenseTotal + (pondBBalance < 0 ? Math.abs(pondBBalance) : 0);
+  const expenseWaveAmount = plannedExpenseTotal;
 
   // 調節後水量 = 收入池實際餘額 + 待入帳收入 - 計畫中支出
   // （代表個人資金的預估淨值）
@@ -260,8 +265,13 @@ export default function MyPondsPage() {
             </div>
 
             <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(124,58,237,0.3)' }}>
-              <WaterWave level={bLevel} variant="pond-b" height={180} label="💸 支出池 (預估負擔)" amount={formatTWD(expenseWaveAmount)} />
+              <WaterWave level={bLevel} variant="pond-b" height={180} label="💸 支出池 (計畫中支出)" amount={formatTWD(expenseWaveAmount)} />
               <div style={{ padding: 'var(--space-5)' }}>
+                {/* 已完成的支出總額 */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)', padding: '6px 10px', background: 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>💸 已完成支出 (累計)</span>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--status-error)' }}>-{formatTWD(completedExpenseTotal)}</span>
+                </div>
                 {/* Pond B 語意說明 */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 'var(--space-3)', padding: '6px 10px', background: pondBBalance < 0 ? 'rgba(224,82,82,0.08)' : pondBBalance > 0 ? 'rgba(26,158,92,0.08)' : 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-sm)', border: `1px solid ${pondBBalance < 0 ? 'rgba(224,82,82,0.2)' : pondBBalance > 0 ? 'rgba(26,158,92,0.2)' : 'var(--color-border)'}` }}>
                   <div className="flex gap-2 items-center">
