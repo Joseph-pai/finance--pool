@@ -275,15 +275,16 @@ export default function DashboardPage() {
                       {formatTWD(m.pond_a?.current_balance ?? 0)}
                     </div>
                   </div>
-
+  
                   {/* Pond B */}
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
                       <span className="text-xs" style={{ color: 'var(--pond-b-light)', fontWeight: 600 }}>💸 支出池</span>
                     </div>
-                    <WaterWave level={bLevel} variant="pond-b" height={100} />
+                    {/* 使用資料庫確切餘額顯示水位與金額 */}
+                    <WaterWave level={calcWaterLevel(Math.abs(m.pond_b?.current_balance ?? 0), maxBalance)} variant="pond-b" height={100} />
                     <div className="amount-display amount-small amount-pond-b" style={{ marginTop: 'var(--space-2)', textAlign: 'center' }}>
-                      -{formatTWD(m.totalExpense)}
+                      {formatTWD(m.pond_b?.current_balance ?? 0)}
                     </div>
                   </div>
                 </div>
