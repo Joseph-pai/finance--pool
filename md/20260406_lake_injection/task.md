@@ -1,0 +1,4 @@
+- [x] Create `009_lake_to_pond_a.sql` to add `source` column to `income_items` securely without complex trigger dependency.
+- [x] Backup `src/app/lake/page.tsx`.
+- [x] Modify `src/app/lake/page.tsx` to add the "Inject to Member" UI panel, fetching `profiles`, and submitting `income_items`.
+- [x] Add `source` validation and typing constraints to TS interfaces.

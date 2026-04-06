@@ -9,8 +9,9 @@ import { format, parseISO } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
 import { useRouter } from 'next/navigation';
 import WaterWave from '@/components/animations/WaterWave';
+import { Profile } from '@/types';
 
-type ModalMode = 'add' | 'edit' | 'set-balance' | null;
+type ModalMode = 'add' | 'edit' | 'set-balance' | 'inject' | null;
 
 export default function LakePage() {
   const { profile, canManageLake } = useAuth();
@@ -25,6 +26,14 @@ export default function LakePage() {
   const [selected, setSelected] = useState<LakeExpense | null>(null);
   const [saving, setSaving]     = useState(false);
   const [newBalance, setNewBalance] = useState('');
+  const [members, setMembers] = useState<Profile[]>([]);
+
+  const [injectForm, setInjectForm] = useState({
+    user_id: '',
+    amount: '',
+    is_immediate: true,
+    expected_date: format(new Date(), 'yyyy-MM-dd'),
+  });
 
   const [form, setForm] = useState({
     name: '', expected_date: '', amount: '',
@@ -35,10 +44,11 @@ export default function LakePage() {
   const load = useCallback(async () => {
     if (!profile?.family_id) return;
     setLoading(true);
-    const [lakeRes, expRes, reqRes] = await Promise.all([
+    const [lakeRes, expRes, reqRes, profRes] = await Promise.all([
       supabase.from('lake').select('*').eq('family_id', profile.family_id).single(),
       supabase.from('lake_expenses').select('*').eq('family_id', profile.family_id).order('expected_date'),
       supabase.from('lake_requests').select('*').eq('family_id', profile.family_id).eq('status', 'approved'),
+      supabase.from('profiles').select('*').eq('family_id', profile.family_id),
     ]);
     const lakeData = lakeRes.data as Lake | null;
     const expData   = (expRes.data ?? []) as LakeExpense[];
@@ -46,6 +56,7 @@ export default function LakePage() {
 
     setLake(lakeData);
     setExpenses(expData);
+    setMembers((profRes.data ?? []) as Profile[]);
     if (lakeData) {
       const pred = calculateLakeDryDate(lakeData.current_balance, expData.filter(e => e.status === 'active'), reqData);
       setPrediction(pred);
@@ -116,6 +127,58 @@ export default function LakePage() {
     load();
   };
 
+  const handleInject = async () => {
+    if (!profile?.family_id || !lake) return;
+    const amt = Number(injectForm.amount);
+    if (!amt || !injectForm.user_id) return;
+    if (amt > lake.current_balance) {
+      alert('注入金額不能超過湖泊餘額');
+      return;
+    }
+    setSaving(true);
+    
+    try {
+      const today = new Date().toISOString().substring(0, 10);
+      
+      // 1. 永遠立即扣除湖泊
+      const { error: txErr } = await supabase.from('transactions').insert({
+        family_id: profile.family_id,
+        user_id: injectForm.user_id,
+        type: 'lake_to_member',
+        amount: amt,
+        source: 'lake',
+        destination: 'pond_a',
+        note: `湖泊撥款至成員收入池${injectForm.is_immediate ? '' : '(預約)'}`,
+        transaction_date: today,
+      });
+      if (txErr) throw new Error(txErr.message);
+
+      // 2. 建立收入紀錄供成員確認/顯示
+      const isNow = injectForm.is_immediate;
+      const { error: incErr } = await supabase.from('income_items').insert({
+        family_id: profile.family_id,
+        user_id: injectForm.user_id,
+        name: '湖泊資金撥入',
+        expected_date: isNow ? today : injectForm.expected_date,
+        amount: amt,
+        actual_amount: isNow ? amt : null,
+        status: isNow ? 'confirmed' : 'pending',
+        source: 'lake',
+        confirmed_at: isNow ? new Date().toISOString() : null,
+      });
+      if (incErr) throw new Error(incErr.message);
+      
+      setModal(null);
+      setInjectForm(f => ({ ...f, amount: '' }));
+      load();
+    } catch (err: any) {
+      alert('調撥失敗：' + err.message);
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const initLake = async () => {
     if (!profile?.family_id) return;
     await supabase.from('lake').upsert({ family_id: profile.family_id, current_balance: 0 }, { onConflict: 'family_id' });
@@ -179,9 +242,14 @@ export default function LakePage() {
                     </span>
                   )}
                 </div>
-                <button className="btn btn-ghost" onClick={() => { setNewBalance(String(lake.current_balance)); setModal('set-balance'); }} id="lake-set-balance-btn">
-                  調整餘額
-                </button>
+                <div className="flex gap-2">
+                  <button className="btn btn-primary" onClick={() => setModal('inject')} id="lake-inject-member-btn">
+                    調撥給成員
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => { setNewBalance(String(lake.current_balance)); setModal('set-balance'); }} id="lake-set-balance-btn">
+                    調整餘額
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -341,6 +409,61 @@ export default function LakePage() {
               <button className="btn btn-ghost" onClick={() => setModal(null)} id="lake-balance-cancel">取消</button>
               <button className="btn btn-primary" onClick={handleSetBalance} disabled={saving || !newBalance} id="lake-balance-save">
                 {saving ? '更新中...' : '確認更新'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Inject to Member Modal */}
+      {modal === 'inject' && (
+        <div className="modal-overlay" onClick={() => setModal(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
+            <div className="modal-header">
+              <h3 className="modal-title">💸 調撥湖泊資金至成員收入池</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setModal(null)}>✕</button>
+            </div>
+            <p className="text-secondary text-sm" style={{ marginBottom: 'var(--space-5)' }}>
+              資金將從湖泊中扣除，並進入該成員的收入池 (Pond A)。<br/>
+              <span style={{color: 'var(--status-warning)'}}>※ 預約到帳：湖泊會立刻扣除保留款項，但該成員須在指定日期才能確認入帳。</span>
+            </p>
+            <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
+              <label className="form-label">選擇接收成員</label>
+              <select className="form-input form-select" value={injectForm.user_id} onChange={e => setInjectForm(f => ({ ...f, user_id: e.target.value }))}>
+                <option value="">-- 請選擇 --</option>
+                {members.map(m => <option key={m.id} value={m.id}>{m.display_name} ({m.role === 'admin' ? '系統管理員' : m.role === 'lake_manager' ? '湖泊管理員' : '成員'})</option>)}
+              </select>
+            </div>
+            <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
+              <label className="form-label">調撥金額 (可用餘額: {formatTWD(lake?.current_balance ?? 0)})</label>
+              <input type="number" className="form-input" placeholder="0" min="1" max={lake?.current_balance} value={injectForm.amount} onChange={e => setInjectForm(f => ({ ...f, amount: e.target.value }))} />
+            </div>
+            
+            <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
+              <label className="form-label" style={{ marginBottom: 10 }}>到帳方式</label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2" style={{ cursor: 'pointer' }}>
+                  <input type="radio" checked={injectForm.is_immediate} onChange={() => setInjectForm(f => ({ ...f, is_immediate: true }))} style={{ width: '1.2rem', height: '1.2rem'}} />
+                  <span style={{fontSize: '0.95rem'}}>即時入帳</span>
+                </label>
+                <label className="flex items-center gap-2" style={{ cursor: 'pointer' }}>
+                  <input type="radio" checked={!injectForm.is_immediate} onChange={() => setInjectForm(f => ({ ...f, is_immediate: false }))} style={{ width: '1.2rem', height: '1.2rem'}} />
+                  <span style={{fontSize: '0.95rem'}}>預約日期入帳</span>
+                </label>
+              </div>
+            </div>
+
+            {!injectForm.is_immediate && (
+              <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
+                <label className="form-label">預計入帳日期</label>
+                <input type="date" className="form-input" value={injectForm.expected_date} onChange={e => setInjectForm(f => ({ ...f, expected_date: e.target.value }))} />
+              </div>
+            )}
+
+            <div className="flex gap-3" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-6)' }}>
+              <button className="btn btn-ghost" onClick={() => setModal(null)}>取消</button>
+              <button className="btn btn-primary" onClick={handleInject} disabled={saving || !injectForm.user_id || !injectForm.amount}>
+                {saving ? '處理中...' : '確認調撥'}
               </button>
             </div>
           </div>

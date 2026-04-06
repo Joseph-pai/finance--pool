@@ -62,6 +62,7 @@ export interface IncomeItem {
   expected_date: string;
   amount: number;
   status: IncomeStatus;
+  source?: 'external' | 'lake';
   actual_amount?: number | null;
   confirmed_at?: string | null;
   created_at: string;

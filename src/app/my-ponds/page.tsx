@@ -113,15 +113,18 @@ export default function MyPondsPage() {
     if (amt > pondABalance) { alert('注入金額不能超過收入池餘額'); return; }
     setInjecting(true);
     try {
-      await supabase.from('transactions').insert({
+      const { error } = await supabase.from('transactions').insert({
         family_id: profile.family_id, user_id: profile.id,
         type: 'transfer_to_pond_b', amount: amt,
         source: 'pond_a', destination: 'pond_b',
         note: '收入池注水至支出池',
         transaction_date: new Date().toISOString().split('T')[0],
       });
+      if (error) {
+        throw new Error(error.message);
+      }
       setShowInjectModal(false); setInjectAmount(''); load();
-    } catch (err) { console.error('注水失敗：', err); }
+    } catch (err: any) { alert('注水失敗：' + (err.message || '發生未知錯誤')); console.error('注水失敗：', err); }
     finally { setInjecting(false); }
   };
 
@@ -132,15 +135,18 @@ export default function MyPondsPage() {
     if (amt > pondABalance) { alert('注入金額不能超過收入池餘額'); return; }
     setInjectingLake(true);
     try {
-      await supabase.from('transactions').insert({
+      const { error } = await supabase.from('transactions').insert({
         family_id: profile.family_id, user_id: profile.id,
         type: 'transfer_to_lake', amount: amt,
         source: 'pond_a', destination: 'lake',
         note: '收入池注入湖泊',
         transaction_date: new Date().toISOString().split('T')[0],
       });
+      if (error) {
+        throw new Error(error.message);
+      }
       setShowLakeModal(false); setInjectLakeAmount(''); load();
-    } catch (err) { console.error('注入湖泊失敗：', err); }
+    } catch (err: any) { alert('注入湖泊失敗：' + (err.message || '發生未知錯誤')); console.error('注入湖泊失敗：', err); }
     finally { setInjectingLake(false); }
   };
 

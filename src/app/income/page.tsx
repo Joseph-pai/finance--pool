@@ -118,8 +118,7 @@ export default function IncomePage() {
         transaction_date: new Date().toISOString().substring(0, 10),
       });
       if (error) {
-        alert('無法注入湖泊：' + error.message);
-        console.error('注入湖泊 API 錯誤：', error);
+        throw new Error(error.message);
       }
     } catch (err: any) {
       alert('系統錯誤：' + err.message);
@@ -148,8 +147,7 @@ export default function IncomePage() {
         transaction_date: new Date().toISOString().substring(0, 10),
       });
       if (error) {
-        alert('無法注入支出池：' + error.message);
-        console.error('注入支出池 API 錯誤：', error);
+        throw new Error(error.message);
       }
     } catch (err: any) {
       alert('系統錯誤：' + err.message);
