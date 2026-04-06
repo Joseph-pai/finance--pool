@@ -49,23 +49,40 @@ export default function MyPondsPage() {
   useEffect(() => { load(); }, [load]);
 
   const bBalance = pondB?.current_balance ?? 0;
-  const adjustedBalance = (pondA?.current_balance ?? 0) + bBalance;
+  
+  // 計算邏輯：
+  // 1. 總收入 = 已到帳(實際金額) + 待入帳(預估金額)
+  const totalIncome = incomes.reduce((sum, inc) => {
+    const val = inc.status === 'confirmed' ? (inc.actual_amount ?? inc.amount) : inc.amount;
+    return sum + val;
+  }, 0);
+  
+  // 2. 總支出 = 已完成支出 + 計畫中支出
+  const totalExpense = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+  
+  // 3. 調節後水量 = 總收入 - 總支出
+  const adjustedBalance = totalIncome - totalExpense;
   
   const maxBalance = Math.max(pondA?.current_balance ?? 0, Math.abs(bBalance), Math.abs(adjustedBalance), 1) * 1.3;
   const aLevel = calcWaterLevel(pondA?.current_balance ?? 0, maxBalance);
   const bLevel = calcWaterLevel(Math.abs(bBalance), maxBalance);
   const adjustedLevel = calcWaterLevel(Math.abs(adjustedBalance), maxBalance);
 
-  // Categorize for Adjusted Card
-  const executedList = [
-    ...incomes.filter(inc => inc.status === 'confirmed').map(i => ({ ...i, type: 'income' as const })),
-    ...expenses.filter(exp => exp.status === 'completed').map(e => ({ ...e, type: 'expense' as const })),
-  ].sort((a, b) => new Date(b.expected_date).getTime() - new Date(a.expected_date).getTime()).slice(0, 5);
+  // Categorize
+  const confirmedIncomes = incomes.filter(inc => inc.status === 'confirmed');
+  const pendingIncomes = incomes.filter(inc => inc.status === 'pending');
+  const completedExpenses = expenses.filter(exp => exp.status === 'completed');
+  const plannedExpenses = expenses.filter(exp => exp.status !== 'completed' && exp.status !== 'rejected');
 
-  const unexecutedList = [
-    ...incomes.filter(inc => inc.status === 'pending').map(i => ({ ...i, type: 'income' as const })),
-    ...expenses.filter(exp => exp.status === 'planned').map(e => ({ ...e, type: 'expense' as const })),
-  ].sort((a, b) => new Date(a.expected_date).getTime() - new Date(b.expected_date).getTime()).slice(0, 5);
+  const statusLabel: Record<string, { text: string; color: string; badge: string }> = {
+    pending:   { text: '待確認', color: 'var(--status-warning)', badge: 'badge-warning' },
+    confirmed: { text: '已到帳', color: 'var(--status-success)', badge: 'badge-success' },
+    failed:    { text: '未到帳', color: 'var(--status-error)', badge: 'badge-error' },
+    planned:   { text: '計畫中', color: 'var(--text-muted)', badge: 'badge-ghost' },
+    approved:  { text: '已核准', color: 'var(--status-info)', badge: 'badge-info' },
+    completed: { text: '已完成', color: 'var(--status-success)', badge: 'badge-success' },
+    rejected:  { text: '已拒絕', color: 'var(--status-error)', badge: 'badge-error' },
+  };
 
   const typeLabel: Record<string, { text: string; color: string }> = {
     income:           { text: '收入',   color: 'var(--status-success)' },
@@ -144,94 +161,95 @@ export default function MyPondsPage() {
 
       {tab === 'overview' && (
         <>
-          {/* Two Ponds */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--space-6)', marginBottom: 'var(--space-8)' }}>
-            {/* Pond A */}
+          {/* Three Ponds Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 'var(--space-6)', marginBottom: 'var(--space-8)' }}>
+            
+            {/* Card 1: Pond A (Confirmed) */}
             <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(26,158,92,0.3)' }}>
               <WaterWave level={aLevel} variant="pond-a" height={180} label="💰 收入池 (池塘A)" amount={formatTWD(pondA?.current_balance ?? 0)} />
               <div style={{ padding: 'var(--space-5)' }}>
-                <div className="flex gap-2">
+                <div className="flex gap-2" style={{ marginBottom: 'var(--space-4)' }}>
                   <button className="btn btn-success btn-sm flex-1" onClick={() => router.push('/income')} id="ponds-go-income">+ 記錄收入</button>
                   <button className="btn btn-primary btn-sm flex-1" onClick={() => setShowInjectModal(true)} id="ponds-inject-b">→ 注入支出池</button>
-                  <button className="btn btn-ghost btn-sm flex-1" onClick={() => router.push('/income')} id="ponds-go-transfer">湖泊</button>
                 </div>
-                {incomes.length > 0 && (
-                  <div style={{ marginTop: 'var(--space-4)' }}>
-                    <p className="text-xs text-muted" style={{ marginBottom: 'var(--space-2)' }}>最近收入</p>
-                    {incomes.slice(0, 3).map(inc => (
-                      <div key={inc.id} className="flex justify-between items-center" style={{ padding: '6px 0', borderBottom: '1px solid var(--color-border-light)', fontSize: '0.85rem' }}>
-                        <span className="text-secondary">{inc.name}</span>
-                        <span style={{ color: 'var(--status-success)' }}>+{formatTWD(inc.amount)}</span>
+                <div>
+                  <p className="text-xs text-muted" style={{ marginBottom: 'var(--space-2)' }}>最近已確認收入</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {confirmedIncomes.slice(0, 5).map(inc => (
+                      <div key={inc.id} className="flex justify-between items-center" style={{ padding: '6px 0', borderBottom: '1px solid var(--color-border-light)', fontSize: '0.8rem' }}>
+                        <div className="flex flex-col">
+                          <span className="font-medium text-secondary">{inc.name}</span>
+                          <span className="text-xs opacity-60">{format(parseISO(inc.expected_date), 'MM/dd')} · 已到帳</span>
+                        </div>
+                        <span style={{ color: 'var(--status-success)', fontWeight: 600 }}>+{formatTWD(inc.actual_amount ?? inc.amount)}</span>
                       </div>
                     ))}
+                    {confirmedIncomes.length === 0 && <p className="text-xs text-muted italic">暫無已到帳收入</p>}
                   </div>
-                )}
+                </div>
               </div>
             </div>
 
-            {/* Pond B */}
+            {/* Card 2: Pond B (Current Expenses/Debt) */}
             <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(124,58,237,0.3)' }}>
               <WaterWave level={bLevel} variant="pond-b" height={180} label="💸 支出池 (池塘B)" amount={formatTWD(bBalance)} />
               <div style={{ padding: 'var(--space-5)' }}>
-                <div className="flex gap-3">
+                <div className="flex gap-3" style={{ marginBottom: 'var(--space-4)' }}>
                   <button className="btn btn-primary btn-sm flex-1" onClick={() => router.push('/expenses')} id="ponds-go-expense">+ 記錄支出</button>
                   <button className="btn btn-ghost btn-sm flex-1" onClick={() => router.push('/requests')} id="ponds-go-request">申請湖泊</button>
                 </div>
-                {expenses.length > 0 && (
-                  <div style={{ marginTop: 'var(--space-4)' }}>
-                    <p className="text-xs text-muted" style={{ marginBottom: 'var(--space-2)' }}>最近支出</p>
-                    {expenses.slice(0, 3).map(exp => (
-                      <div key={exp.id} className="flex justify-between items-center" style={{ padding: '6px 0', borderBottom: '1px solid var(--color-border-light)', fontSize: '0.85rem' }}>
-                        <span className="text-secondary">{exp.name}</span>
-                        <span style={{ color: 'var(--status-error)' }}>-{formatTWD(exp.amount)}</span>
+                <div>
+                  <p className="text-xs text-muted" style={{ marginBottom: 'var(--space-2)' }}>最近已完成支出</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {completedExpenses.slice(0, 5).map(exp => (
+                      <div key={exp.id} className="flex justify-between items-center" style={{ padding: '6px 0', borderBottom: '1px solid var(--color-border-light)', fontSize: '0.8rem' }}>
+                        <div className="flex flex-col">
+                          <span className="font-medium text-secondary">{exp.name}</span>
+                          <span className="text-xs opacity-60">{format(parseISO(exp.expected_date), 'MM/dd')} · 已完成</span>
+                        </div>
+                        <span style={{ color: 'var(--status-error)', fontWeight: 600 }}>-{formatTWD(exp.amount)}</span>
                       </div>
                     ))}
+                    {completedExpenses.length === 0 && <p className="text-xs text-muted italic">暫無已完成支出</p>}
                   </div>
-                )}
+                </div>
               </div>
             </div>
 
-            {/* Adjusted Pool */}
+            {/* Card 3: Adjusted (Prediction) */}
             <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(14,165,233,0.3)' }}>
               <WaterWave level={adjustedLevel} variant="adjusted" height={180} label="⚖️ 調節後水量" amount={formatTWD(adjustedBalance)} />
               <div style={{ padding: 'var(--space-5)' }}>
                 <div className="flex flex-col gap-4">
                   <div>
                     <p className="text-xs font-semibold text-accent" style={{ marginBottom: 'var(--space-2)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span>✅ 已執行項目</span>
+                      <span>⏳ 未執行預核 (影響調節水位)</span>
                     </p>
-                    {executedList.length > 0 ? (
-                      executedList.map(item => (
-                        <div key={item.id} className="flex justify-between items-center" style={{ padding: '4px 0', fontSize: '0.8rem' }}>
-                          <span className="text-secondary truncate" style={{ maxWidth: '60%' }}>{item.name}</span>
-                          <span style={{ color: item.type === 'income' ? 'var(--status-success)' : 'var(--status-error)' }}>
-                            {item.type === 'income' ? '+' : '-'}{formatTWD(item.amount)}
-                          </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      {/* Show Pending Incomes */}
+                      {pendingIncomes.map(inc => (
+                        <div key={inc.id} className="flex justify-between items-center" style={{ padding: '6px 0', borderBottom: '1px solid var(--color-border-light)', fontSize: '0.8rem' }}>
+                          <div className="flex flex-col">
+                            <span className="font-medium text-secondary">{inc.name}</span>
+                            <span className="text-xs opacity-60">{format(parseISO(inc.expected_date), 'MM/dd')} · 待入帳</span>
+                          </div>
+                          <span style={{ color: 'var(--status-success)', opacity: 0.8 }}>+{formatTWD(inc.amount)}</span>
                         </div>
-                      ))
-                    ) : (
-                      <p className="text-xs text-muted italic">暫無已完成項目</p>
-                    )}
-                  </div>
-
-                  <div style={{ borderTop: '1px dashed var(--color-border)', paddingTop: 'var(--space-3)' }}>
-                    <p className="text-xs font-semibold text-warning" style={{ marginBottom: 'var(--space-2)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span>⏳ 未執行預核</span>
-                    </p>
-                    {unexecutedList.length > 0 ? (
-                      unexecutedList.map(item => (
-                        <div key={item.id} className="flex justify-between items-center" style={{ padding: '4px 0', fontSize: '0.8rem' }}>
-                          <span className="text-secondary truncate" style={{ maxWidth: '60%' }}>
-                            {item.name} <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>({format(parseISO(item.expected_date), 'MM/dd')})</span>
-                          </span>
-                          <span className="text-muted">
-                            {item.type === 'income' ? '+' : '-'}{formatTWD(item.amount)}
-                          </span>
+                      ))}
+                      {/* Show Planned/Approved Expenses */}
+                      {plannedExpenses.map(exp => (
+                        <div key={exp.id} className="flex justify-between items-center" style={{ padding: '6px 0', borderBottom: '1px solid var(--color-border-light)', fontSize: '0.8rem' }}>
+                          <div className="flex flex-col">
+                            <span className="font-medium text-secondary">{exp.name}</span>
+                            <span className="text-xs opacity-60">{format(parseISO(exp.expected_date), 'MM/dd')} · {statusLabel[exp.status]?.text || exp.status}</span>
+                          </div>
+                          <span style={{ color: 'var(--status-error)', opacity: 0.8 }}>-{formatTWD(exp.amount)}</span>
                         </div>
-                      ))
-                    ) : (
-                      <p className="text-xs text-muted italic">暫無計畫中項目</p>
-                    )}
+                      ))}
+                      {pendingIncomes.length === 0 && plannedExpenses.length === 0 && (
+                        <p className="text-xs text-muted italic">暫無預計變動項目</p>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
