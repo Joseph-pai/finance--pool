@@ -97,7 +97,50 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 4. 針對現在系統的所有人再重算一次池塘，確保數字正確
+-- 4. 更新 fn_trigger_transaction_changed
+-- 確保當 source 或 destination 涉及 pond_a/pond_b 時，兩邊都會正確重算
+CREATE OR REPLACE FUNCTION fn_trigger_transaction_changed()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_user_id   UUID;
+    v_family_id UUID;
+BEGIN
+    -- 取得相關的 user_id 和 family_id
+    IF TG_OP = 'DELETE' THEN
+        v_user_id   := OLD.user_id;
+        v_family_id := OLD.family_id;
+    ELSE
+        v_user_id   := NEW.user_id;
+        v_family_id := NEW.family_id;
+    END IF;
+
+    -- 同步 Pond A
+    IF v_user_id IS NOT NULL THEN
+        IF (TG_OP = 'DELETE' AND (OLD.source = 'pond_a' OR OLD.destination = 'pond_a')) OR
+           (TG_OP != 'DELETE' AND (NEW.source = 'pond_a' OR NEW.destination = 'pond_a')) THEN
+            PERFORM fn_recalc_pond_a(v_user_id);
+        END IF;
+
+        -- 同步 Pond B
+        IF (TG_OP = 'DELETE' AND (OLD.source = 'pond_b' OR OLD.destination = 'pond_b')) OR
+           (TG_OP != 'DELETE' AND (NEW.source = 'pond_b' OR NEW.destination = 'pond_b')) THEN
+            PERFORM fn_recalc_pond_b(v_user_id);
+        END IF;
+    END IF;
+
+    -- 同步 Lake
+    IF v_family_id IS NOT NULL THEN
+        IF (TG_OP = 'DELETE' AND OLD.type IN ('transfer_to_lake', 'lake_to_member', 'lake_expense')) OR
+           (TG_OP != 'DELETE' AND NEW.type IN ('transfer_to_lake', 'lake_to_member', 'lake_expense')) THEN
+            PERFORM fn_recalc_lake(v_family_id);
+        END IF;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 5. 針對現在系統的所有人再重算一次池塘，確保數字正確
 DO $$ 
 DECLARE
     r RECORD;
