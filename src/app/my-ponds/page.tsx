@@ -31,6 +31,12 @@ export default function MyPondsPage() {
   const [injectLakeAmount, setInjectLakeAmount] = useState('');
   const [injectingLake, setInjectingLake]       = useState(false);
 
+  // 支出池退款 modal
+  const [showRefundModal, setShowRefundModal]   = useState(false);
+  const [refundTarget, setRefundTarget]         = useState<'lake' | 'pond_a'>('pond_a');
+  const [refundAmount, setRefundAmount]         = useState('');
+  const [refunding, setRefunding]               = useState(false);
+
   const load = useCallback(async () => {
     if (!profile?.id || !profile?.family_id) return;
     setLoading(true);
@@ -150,6 +156,30 @@ export default function MyPondsPage() {
     finally { setInjectingLake(false); }
   };
 
+  // ── 退回支出池資金 (Pond B) ─────────────────────────────────────────────
+  const handleRefundPondB = async () => {
+    const amt = Number(refundAmount);
+    if (!amt || !profile || !pondB) return;
+    if (amt > pondBBalance) { alert('退回金額不能超過支出池餘額'); return; }
+    setRefunding(true);
+    try {
+      const type = refundTarget === 'lake' ? 'transfer_to_lake' : 'transfer_from_pond_b';
+      const dest = refundTarget === 'lake' ? 'lake' : 'pond_a';
+      const { error } = await supabase.from('transactions').insert({
+        family_id: profile.family_id, user_id: profile.id,
+        type: type, amount: amt,
+        source: 'pond_b', destination: dest,
+        note: `支出池退回資金至${refundTarget === 'lake' ? '湖泊' : '收入池'}`,
+        transaction_date: new Date().toISOString().split('T')[0],
+      });
+      if (error) {
+        throw new Error(error.message);
+      }
+      setShowRefundModal(false); setRefundAmount(''); load();
+    } catch (err: any) { alert('退回資金失敗：' + (err.message || '發生未知錯誤')); console.error('退回資金失敗：', err); }
+    finally { setRefunding(false); }
+  };
+
   if (loading) {
     return (
       <div className="page-container">
@@ -233,6 +263,11 @@ export default function MyPondsPage() {
                   <button className="btn btn-primary btn-sm flex-1" onClick={() => router.push('/expenses')} id="ponds-go-expense">+ 記錄支出</button>
                   <button className="btn btn-ghost btn-sm flex-1" onClick={() => router.push('/requests')} id="ponds-go-request">申請湖泊</button>
                 </div>
+                {pondBBalance > 0 && (
+                  <button className="btn btn-ghost btn-sm w-full" style={{ marginBottom: 'var(--space-4)', borderColor: 'rgba(124,58,237,0.4)', color: 'var(--pond-b-light)' }} onClick={() => setShowRefundModal(true)}>
+                    ← 退回 / 轉出資金
+                  </button>
+                )}
                 <div>
                   <p className="text-xs text-muted" style={{ marginBottom: 'var(--space-2)' }}>最近已完成支出</p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -419,6 +454,41 @@ export default function MyPondsPage() {
               <button className="btn btn-ghost" onClick={() => setShowLakeModal(false)}>取消</button>
               <button className="btn btn-primary" onClick={handleTransferToLake} disabled={injectingLake || !injectLakeAmount || Number(injectLakeAmount) <= 0 || Number(injectLakeAmount) > pondABalance}>
                 {injectingLake ? '處理中...' : '確認注入'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 退回支出池資金 Modal */}
+      {showRefundModal && (
+        <div className="modal-overlay" onClick={() => setShowRefundModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+            <div className="modal-header">
+              <h3 className="modal-title">💸 支出池退回資金</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowRefundModal(false)}>✕</button>
+            </div>
+            <div style={{ marginBottom: 'var(--space-5)' }}>
+              <p className="text-sm text-secondary">將支出池的預付餘額轉出至其他池塘。</p>
+              <div className="flex justify-between text-xs font-mono" style={{ marginTop: 12, padding: 8, background: 'rgba(0,0,0,0.2)', borderRadius: 4 }}>
+                <span>支出池可退餘額：{formatTWD(pondBBalance)}</span>
+              </div>
+            </div>
+            <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
+              <label className="form-label">退回目標</label>
+              <select className="form-input" value={refundTarget} onChange={e => setRefundTarget(e.target.value as 'lake' | 'pond_a')}>
+                <option value="pond_a">💰 我的收入池 (池塘 A)</option>
+                <option value="lake">🌊 家庭湖泊</option>
+              </select>
+            </div>
+            <div className="form-group" style={{ marginBottom: 'var(--space-6)' }}>
+              <label className="form-label">退回金額</label>
+              <input type="number" className="form-input" placeholder="0" max={pondBBalance} value={refundAmount} onChange={e => setRefundAmount(e.target.value)} autoFocus />
+            </div>
+            <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setShowRefundModal(false)}>取消</button>
+              <button className="btn btn-primary" onClick={handleRefundPondB} disabled={refunding || !refundAmount || Number(refundAmount) <= 0 || Number(refundAmount) > pondBBalance}>
+                {refunding ? '處理中...' : '確認退回'}
               </button>
             </div>
           </div>
