@@ -57,9 +57,9 @@ export default function MyPondsPage() {
   // Pond A 實際餘額（資料庫值，由觸發器維護）
   const pondABalance = pondA?.current_balance ?? 0;
 
-  // Pond B 欠款金額（資料庫值為負，取絕對值顯示）
+  // Pond B 餘額（可能為正預付或負欠款）
   const pondBBalance = pondB?.current_balance ?? 0;
-  const pondBDebt    = Math.abs(pondBBalance); // 顯示用正數
+  const pondBDisplayStr = pondBBalance < 0 ? `-${formatTWD(Math.abs(pondBBalance))}` : pondBBalance > 0 ? `+${formatTWD(pondBBalance)}` : formatTWD(0);
 
   // 待入帳的預計收入（pending 狀態，用預計金額）
   const pendingIncomeTotal = incomes
@@ -76,9 +76,9 @@ export default function MyPondsPage() {
   const adjustedBalance = pondABalance + pendingIncomeTotal - plannedExpenseTotal;
 
   // 水位顯示基準值
-  const maxBalance   = Math.max(pondABalance, pondBDebt, Math.abs(adjustedBalance), pendingIncomeTotal, plannedExpenseTotal, 1) * 1.3;
+  const maxBalance   = Math.max(pondABalance, Math.abs(pondBBalance), Math.abs(adjustedBalance), pendingIncomeTotal, plannedExpenseTotal, 1) * 1.3;
   const aLevel       = calcWaterLevel(pondABalance, maxBalance);
-  const bLevel       = calcWaterLevel(pondBDebt, maxBalance);
+  const bLevel       = calcWaterLevel(Math.abs(pondBBalance), maxBalance);
   const adjustedLevel = calcWaterLevel(Math.max(0, adjustedBalance), maxBalance);
 
   // ── 分類顯示用 ────────────────────────────────────────────────────
@@ -219,9 +219,8 @@ export default function MyPondsPage() {
               </div>
             </div>
 
-            {/* ── Card 2: 支出池 (池塘B) ── */}
             <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(124,58,237,0.3)' }}>
-              <WaterWave level={bLevel} variant="pond-b" height={180} label="💸 支出池 (池塘B)" amount={pondBDebt > 0 ? `-${formatTWD(pondBDebt)}` : formatTWD(0)} />
+              <WaterWave level={bLevel} variant="pond-b" height={180} label="💸 支出池 (池塘B)" amount={pondBDisplayStr} />
               <div style={{ padding: 'var(--space-5)' }}>
                 {/* 計畫中支出提示 */}
                 {plannedExpenseTotal > 0 && (
@@ -378,10 +377,10 @@ export default function MyPondsPage() {
               <button className="btn btn-ghost btn-sm" onClick={() => setShowInjectModal(false)}>✕</button>
             </div>
             <div style={{ marginBottom: 'var(--space-5)' }}>
-              <p className="text-sm text-secondary">將收入池資金移轉至支出池，減少個人支出欠款。</p>
+              <p className="text-sm text-secondary">將收入池資金移轉至支出池，增加個人可用餘額。</p>
               <div className="flex justify-between text-xs font-mono" style={{ marginTop: 12, padding: 8, background: 'rgba(0,0,0,0.2)', borderRadius: 4 }}>
                 <span>收入池可用：{formatTWD(pondABalance)}</span>
-                <span>支出池欠款：{pondBDebt > 0 ? `-${formatTWD(pondBDebt)}` : formatTWD(0)}</span>
+                <span>支出池餘額：{pondBDisplayStr}</span>
               </div>
             </div>
             <div className="form-group" style={{ marginBottom: 'var(--space-6)' }}>

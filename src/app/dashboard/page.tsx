@@ -248,9 +248,10 @@ export default function DashboardPage() {
         <div style={{ display: 'grid', gap: 'var(--space-5)', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
           {members.map((m) => {
             const aBalance = m.pond_a?.current_balance ?? 0;
-            const bBalance = Math.abs(m.pond_b?.current_balance ?? 0);
+            const bRawBalance = m.pond_b?.current_balance ?? 0;
+            
             const aLevel   = calcWaterLevel(aBalance, maxBalance);
-            const bLevel   = calcWaterLevel(bBalance + m.plannedExpenseTotal, maxBalance);
+            const bLevel   = calcWaterLevel(Math.abs(bRawBalance) + m.plannedExpenseTotal, maxBalance);
             const isMe     = m.profile.id === profile?.id;
 
             return (
@@ -311,8 +312,8 @@ export default function DashboardPage() {
                     </div>
                     <WaterWave level={bLevel} variant="pond-b" height={100} />
                     {/* 已完成支出餘額 */}
-                    <div className="amount-display amount-small amount-pond-b" style={{ marginTop: 'var(--space-2)', textAlign: 'center' }}>
-                      {bBalance > 0 ? `-${formatTWD(bBalance)}` : formatTWD(0)}
+                    <div className="amount-display amount-small amount-pond-b" style={{ marginTop: 'var(--space-2)', textAlign: 'center', color: bRawBalance < 0 ? 'var(--status-error)' : bRawBalance > 0 ? 'var(--status-success)' : undefined }}>
+                      {bRawBalance < 0 ? `-${formatTWD(Math.abs(bRawBalance))}` : bRawBalance > 0 ? `+${formatTWD(bRawBalance)}` : formatTWD(0)}
                     </div>
                     {/* 計畫中支出標示 */}
                     {m.plannedExpenseTotal > 0 && (
