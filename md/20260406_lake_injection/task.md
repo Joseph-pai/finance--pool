@@ -1,4 +1,4 @@
-- [x] Create `009_lake_to_pond_a.sql` to add `source` column to `income_items` securely without complex trigger dependency.
-- [x] Backup `src/app/lake/page.tsx`.
-- [x] Modify `src/app/lake/page.tsx` to add the "Inject to Member" UI panel, fetching `profiles`, and submitting `income_items`.
-- [x] Add `source` validation and typing constraints to TS interfaces.
+- [x] Create `011_pond_b_refunds.sql` to expand `transaction` types and modify `fn_recalc_pond_a` and `fn_recalc_pond_b`.
+- [x] Backup `src/app/my-ponds/page.tsx` and `src/types/index.ts`.
+- [x] Add `'transfer_from_pond_b'` to `TransactionType` in `src/types/index.ts`.
+- [x] Implement the UI modal and logic in `src/app/my-ponds/page.tsx` for refunding from Pond B.
