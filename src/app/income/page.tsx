@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
-import { IncomeItem, Profile } from '@/types';
+import { IncomeItem, Profile, PondA } from '@/types';
 import { formatTWD } from '@/lib/predictions';
 import { format, isAfter, parseISO } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
@@ -15,6 +15,7 @@ export default function IncomePage() {
   const supabase = createClient();
 
   const [items, setItems]         = useState<(IncomeItem & { profile?: Profile })[]>([]);
+  const [pondA, setPondA]         = useState<PondA | null>(null);
   const [loading, setLoading]     = useState(true);
   const [modal, setModal]         = useState<ModalMode>(null);
   const [selected, setSelected]   = useState<IncomeItem | null>(null);
@@ -26,18 +27,22 @@ export default function IncomePage() {
   const [form, setForm] = useState({ name: '', expected_date: '', amount: '', user_id: '' });
   const [transferAmount, setTransferAmount] = useState('');
   const [confirmActual, setConfirmActual] = useState('');
+  // 追蹤目前正在操作哪一個 item 的輸入框（避免多列共用 state 混淆）
+  const [activeItemId, setActiveItemId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!profile?.family_id) return;
+    if (!profile?.family_id || !profile?.id) return;
     setLoading(true);
-    const [incRes, profRes] = await Promise.all([
+    const [incRes, profRes, pondARes] = await Promise.all([
       supabase.from('income_items').select('*, profile:profiles(*)').eq('family_id', profile.family_id).order('expected_date', { ascending: true }),
       supabase.from('profiles').select('*').eq('family_id', profile.family_id),
+      supabase.from('pond_a').select('*').eq('user_id', profile.id).single(),
     ]);
     setItems((incRes.data ?? []) as (IncomeItem & { profile?: Profile })[]);
     setMembers((profRes.data ?? []) as Profile[]);
+    setPondA(pondARes.data as PondA | null);
     setLoading(false);
-  }, [profile?.family_id, supabase]);
+  }, [profile?.family_id, profile?.id, supabase]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -124,6 +129,31 @@ export default function IncomePage() {
     load();
   };
 
+  // 注入支出池（從已到帳收入直接撥至個人支出池）
+  const handleTransferToPondBFromIncome = async (item: IncomeItem) => {
+    const amt = Number(transferAmount);
+    if (!amt || !profile) return;
+    setSaving(true);
+    try {
+      await supabase.from('transactions').insert({
+        family_id: profile.family_id,
+        user_id: item.user_id,
+        type: 'transfer_to_pond_b',
+        amount: amt,
+        source: 'pond_a',
+        destination: 'pond_b',
+        note: `注入支出池：${item.name}`,
+        transaction_date: new Date().toISOString().substring(0, 10),
+      });
+    } catch (err) {
+      console.error('注入支出池失敗：', err);
+    }
+    setTransferAmount('');
+    setActiveItemId(null);
+    setSaving(false);
+    load();
+  };
+
   const handleDelete = async (id: string) => {
     await supabase.from('income_items').delete().eq('id', id);
     load();
@@ -156,6 +186,11 @@ export default function IncomePage() {
         <div className="card card-sm" style={{ borderColor: 'rgba(99,179,237,0.3)' }}>
           <p className="text-xs text-muted" style={{ marginBottom: 4 }}>已確認合計</p>
           <p className="amount-display amount-medium" style={{ color: 'var(--status-info)' }}>{formatTWD(totalConfirmed)}</p>
+        </div>
+        <div className="card card-sm" style={{ borderColor: 'rgba(26,111,181,0.4)', background: 'rgba(26,111,181,0.06)' }}>
+          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>池塘A 剩餘餘額</p>
+          <p className="amount-display amount-medium" style={{ color: 'var(--text-accent)' }}>{formatTWD(pondA?.current_balance ?? 0)}</p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 2 }}>（已確認 - 已轉出）</p>
         </div>
         <div className="card card-sm">
           <p className="text-xs text-muted" style={{ marginBottom: 4 }}>收入筆數</p>
@@ -228,18 +263,36 @@ export default function IncomePage() {
                           </button>
                         )}
                         {item.status === 'confirmed' && (
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <input
                               type="number"
                               className="form-input"
-                              style={{ width: 100, padding: '4px 8px', fontSize: '0.85rem' }}
-                              placeholder="注入金額"
-                              value={transferAmount}
+                              style={{ width: 90, padding: '4px 8px', fontSize: '0.85rem' }}
+                              placeholder="金額"
+                              value={activeItemId === item.id ? transferAmount : ''}
+                              onFocus={() => {
+                                setActiveItemId(item.id);
+                                setTransferAmount('');
+                              }}
                               onChange={e => setTransferAmount(e.target.value)}
                               id={`income-transfer-input-${item.id}`}
                             />
-                            <button className="btn btn-primary btn-sm" onClick={() => handleTransferToLake(item)} disabled={saving} id={`income-transfer-${item.id}`}>
+                            <button
+                              className="btn btn-primary btn-sm"
+                              onClick={() => { setActiveItemId(item.id); handleTransferToLake(item); }}
+                              disabled={saving || activeItemId !== item.id || !transferAmount}
+                              id={`income-transfer-lake-${item.id}`}
+                            >
                               注入湖泊
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              style={{ borderColor: 'rgba(124,58,237,0.5)', color: 'var(--pond-b-light)' }}
+                              onClick={() => { setActiveItemId(item.id); handleTransferToPondBFromIncome(item); }}
+                              disabled={saving || activeItemId !== item.id || !transferAmount}
+                              id={`income-transfer-pond-b-${item.id}`}
+                            >
+                              注入支出池
                             </button>
                           </div>
                         )}

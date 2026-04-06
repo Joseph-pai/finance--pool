@@ -22,9 +22,14 @@ export default function MyPondsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading]           = useState(true);
   const [tab, setTab]                   = useState<'overview' | 'history'>('overview');
+  // 支出池注入 modal
   const [showInjectModal, setShowInjectModal] = useState(false);
   const [injectAmount, setInjectAmount] = useState('');
   const [injecting, setInjecting]       = useState(false);
+  // 湖泊注入 modal
+  const [showLakeModal, setShowLakeModal]       = useState(false);
+  const [injectLakeAmount, setInjectLakeAmount] = useState('');
+  const [injectingLake, setInjectingLake]       = useState(false);
 
   const load = useCallback(async () => {
     if (!profile?.id || !profile?.family_id) return;
@@ -105,33 +110,38 @@ export default function MyPondsPage() {
   const handleTransferToPondB = async () => {
     const amt = Number(injectAmount);
     if (!amt || !profile || !pondA || !pondB) return;
-    if (amt > pondABalance) {
-      alert('注入金額不能超過收入池餘額');
-      return;
-    }
+    if (amt > pondABalance) { alert('注入金額不能超過收入池餘額'); return; }
     setInjecting(true);
-
     try {
-      // 只插入交易記錄；資料庫觸發器自動同步 pond_a 和 pond_b
       await supabase.from('transactions').insert({
-        family_id: profile.family_id,
-        user_id: profile.id,
-        type: 'transfer_to_pond_b',
-        amount: amt,
-        source: 'pond_a',
-        destination: 'pond_b',
+        family_id: profile.family_id, user_id: profile.id,
+        type: 'transfer_to_pond_b', amount: amt,
+        source: 'pond_a', destination: 'pond_b',
         note: '收入池注水至支出池',
         transaction_date: new Date().toISOString().split('T')[0],
       });
+      setShowInjectModal(false); setInjectAmount(''); load();
+    } catch (err) { console.error('注水失敗：', err); }
+    finally { setInjecting(false); }
+  };
 
-      setShowInjectModal(false);
-      setInjectAmount('');
-      load();
-    } catch (err) {
-      console.error('注水失敗：', err);
-    } finally {
-      setInjecting(false);
-    }
+  // ── 收入池注入湖泊 ──────────────────────────────────────────────────
+  const handleTransferToLake = async () => {
+    const amt = Number(injectLakeAmount);
+    if (!amt || !profile) return;
+    if (amt > pondABalance) { alert('注入金額不能超過收入池餘額'); return; }
+    setInjectingLake(true);
+    try {
+      await supabase.from('transactions').insert({
+        family_id: profile.family_id, user_id: profile.id,
+        type: 'transfer_to_lake', amount: amt,
+        source: 'pond_a', destination: 'lake',
+        note: '收入池注入湖泊',
+        transaction_date: new Date().toISOString().split('T')[0],
+      });
+      setShowLakeModal(false); setInjectLakeAmount(''); load();
+    } catch (err) { console.error('注入湖泊失敗：', err); }
+    finally { setInjectingLake(false); }
   };
 
   if (loading) {
@@ -180,9 +190,10 @@ export default function MyPondsPage() {
                     <span className="text-xs font-semibold" style={{ color: 'var(--status-warning)' }}>+{formatTWD(pendingIncomeTotal)}</span>
                   </div>
                 )}
-                <div className="flex gap-2" style={{ marginBottom: 'var(--space-4)' }}>
-                  <button className="btn btn-success btn-sm flex-1" onClick={() => router.push('/income')} id="ponds-go-income">+ 記錄收入</button>
-                  <button className="btn btn-primary btn-sm flex-1" onClick={() => setShowInjectModal(true)} id="ponds-inject-b">→ 注入支出池</button>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-2)', marginBottom: 'var(--space-4)' }}>
+                  <button className="btn btn-success btn-sm" onClick={() => router.push('/income')} id="ponds-go-income">+ 記錄收入</button>
+                  <button className="btn btn-primary btn-sm" onClick={() => setShowLakeModal(true)} id="ponds-inject-lake">→ 湖泊</button>
+                  <button className="btn btn-ghost btn-sm" style={{ borderColor: 'rgba(124,58,237,0.4)', color: 'var(--pond-b-light)' }} onClick={() => setShowInjectModal(true)} id="ponds-inject-b">→ 支出池</button>
                 </div>
                 <div>
                   <p className="text-xs text-muted" style={{ marginBottom: 'var(--space-2)' }}>最近已確認收入</p>
@@ -352,11 +363,12 @@ export default function MyPondsPage() {
       )}
 
       {/* 注水至支出池彈窗 */}
+      {/* 注入支出池 Modal */}
       {showInjectModal && (
         <div className="modal-overlay" onClick={() => setShowInjectModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
             <div className="modal-header">
-              <h3 className="modal-title">🌊 收入池注水至支出池</h3>
+              <h3 className="modal-title">💸 收入池 → 支出池</h3>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowInjectModal(false)}>✕</button>
             </div>
             <div style={{ marginBottom: 'var(--space-5)' }}>
@@ -368,24 +380,40 @@ export default function MyPondsPage() {
             </div>
             <div className="form-group" style={{ marginBottom: 'var(--space-6)' }}>
               <label className="form-label">注入金額</label>
-              <input
-                type="number"
-                className="form-input"
-                placeholder="0"
-                max={pondABalance}
-                value={injectAmount}
-                onChange={e => setInjectAmount(e.target.value)}
-                autoFocus
-              />
+              <input type="number" className="form-input" placeholder="0" max={pondABalance} value={injectAmount} onChange={e => setInjectAmount(e.target.value)} autoFocus />
             </div>
             <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => setShowInjectModal(false)}>取消</button>
-              <button
-                className="btn btn-primary"
-                onClick={handleTransferToPondB}
-                disabled={injecting || !injectAmount || Number(injectAmount) <= 0 || Number(injectAmount) > pondABalance}
-              >
+              <button className="btn btn-primary" onClick={handleTransferToPondB} disabled={injecting || !injectAmount || Number(injectAmount) <= 0 || Number(injectAmount) > pondABalance}>
                 {injecting ? '處理中...' : '確認注入'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 注入湖泊 Modal */}
+      {showLakeModal && (
+        <div className="modal-overlay" onClick={() => setShowLakeModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+            <div className="modal-header">
+              <h3 className="modal-title">🌊 收入池 → 湖泊</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowLakeModal(false)}>✕</button>
+            </div>
+            <div style={{ marginBottom: 'var(--space-5)' }}>
+              <p className="text-sm text-secondary">將收入池資金注入家庭湖泊，增加公共資金池。</p>
+              <div className="flex justify-between text-xs font-mono" style={{ marginTop: 12, padding: 8, background: 'rgba(0,0,0,0.2)', borderRadius: 4 }}>
+                <span>收入池可用：{formatTWD(pondABalance)}</span>
+              </div>
+            </div>
+            <div className="form-group" style={{ marginBottom: 'var(--space-6)' }}>
+              <label className="form-label">注入金額</label>
+              <input type="number" className="form-input" placeholder="0" max={pondABalance} value={injectLakeAmount} onChange={e => setInjectLakeAmount(e.target.value)} autoFocus />
+            </div>
+            <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setShowLakeModal(false)}>取消</button>
+              <button className="btn btn-primary" onClick={handleTransferToLake} disabled={injectingLake || !injectLakeAmount || Number(injectLakeAmount) <= 0 || Number(injectLakeAmount) > pondABalance}>
+                {injectingLake ? '處理中...' : '確認注入'}
               </button>
             </div>
           </div>
