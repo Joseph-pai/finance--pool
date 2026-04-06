@@ -78,14 +78,18 @@ export default function MyPondsPage() {
     .filter(e => e.status === 'planned' || e.status === 'approved')
     .reduce((sum, e) => sum + e.amount, 0);
 
+  // 方案 A：收入池與支出池顯示預估全貌
+  const incomeWaveAmount  = pondABalance + pendingIncomeTotal;
+  const expenseWaveAmount = plannedExpenseTotal + (pondBBalance < 0 ? Math.abs(pondBBalance) : 0);
+
   // 調節後水量 = 收入池實際餘額 + 待入帳收入 - 計畫中支出
   // （代表個人資金的預估淨值）
   const adjustedBalance = pondABalance + pendingIncomeTotal - plannedExpenseTotal;
 
   // 水位顯示基準值
-  const maxBalance   = Math.max(pondABalance, Math.abs(pondBBalance), Math.abs(adjustedBalance), pendingIncomeTotal, plannedExpenseTotal, 1) * 1.3;
-  const aLevel       = calcWaterLevel(pondABalance, maxBalance);
-  const bLevel       = calcWaterLevel(Math.abs(pondBBalance), maxBalance);
+  const maxBalance   = Math.max(incomeWaveAmount, expenseWaveAmount, Math.abs(adjustedBalance), 1) * 1.3;
+  const aLevel       = calcWaterLevel(incomeWaveAmount, maxBalance);
+  const bLevel       = calcWaterLevel(expenseWaveAmount, maxBalance);
   const adjustedLevel = calcWaterLevel(Math.max(0, adjustedBalance), maxBalance);
 
   // ── 分類顯示用 ────────────────────────────────────────────────────
@@ -218,8 +222,13 @@ export default function MyPondsPage() {
 
             {/* ── Card 1: 收入池 (池塘A) ── */}
             <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(26,158,92,0.3)' }}>
-              <WaterWave level={aLevel} variant="pond-a" height={180} label="💰 收入池 (池塘A)" amount={formatTWD(pondABalance)} />
+              <WaterWave level={aLevel} variant="pond-a" height={180} label="💰 收入池 (預估總量)" amount={formatTWD(incomeWaveAmount)} />
               <div style={{ padding: 'var(--space-5)' }}>
+                {/* 目前存量 */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)', padding: '6px 10px', background: 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>💵 目前可用 (未分配)</span>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--status-success)' }}>{formatTWD(pondABalance)}</span>
+                </div>
                 {/* 待入帳提示 */}
                 {pendingIncomeTotal > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)', padding: '8px 12px', background: 'rgba(237,188,26,0.1)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(237,188,26,0.25)' }}>
@@ -251,14 +260,19 @@ export default function MyPondsPage() {
             </div>
 
             <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(124,58,237,0.3)' }}>
-              <WaterWave level={bLevel} variant="pond-b" height={180} label="💸 支出池 (池塘B)" amount={pondBDisplayStr} />
+              <WaterWave level={bLevel} variant="pond-b" height={180} label="💸 支出池 (預估負擔)" amount={formatTWD(expenseWaveAmount)} />
               <div style={{ padding: 'var(--space-5)' }}>
                 {/* Pond B 語意說明 */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 'var(--space-3)', padding: '6px 10px', background: pondBBalance < 0 ? 'rgba(224,82,82,0.08)' : pondBBalance > 0 ? 'rgba(26,158,92,0.08)' : 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-sm)', border: `1px solid ${pondBBalance < 0 ? 'rgba(224,82,82,0.2)' : pondBBalance > 0 ? 'rgba(26,158,92,0.2)' : 'var(--color-border)'}` }}>
-                  <span style={{ fontSize: '0.72rem', color: pondBBalance < 0 ? 'var(--status-error)' : pondBBalance > 0 ? 'var(--status-success)' : 'var(--text-muted)' }}>
-                    {pondBBalance < 0 ? '🔴 欠款中（已支出尚未注水）' : pondBBalance > 0 ? '🟢 有預付餘額（可退回）' : '⚪ 收支平衡'}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 'var(--space-3)', padding: '6px 10px', background: pondBBalance < 0 ? 'rgba(224,82,82,0.08)' : pondBBalance > 0 ? 'rgba(26,158,92,0.08)' : 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-sm)', border: `1px solid ${pondBBalance < 0 ? 'rgba(224,82,82,0.2)' : pondBBalance > 0 ? 'rgba(26,158,92,0.2)' : 'var(--color-border)'}` }}>
+                  <div className="flex gap-2 items-center">
+                    <span style={{ fontSize: '0.72rem', color: pondBBalance < 0 ? 'var(--status-error)' : pondBBalance > 0 ? 'var(--status-success)' : 'var(--text-muted)' }}>
+                      {pondBBalance < 0 ? '🔴 欠款中' : pondBBalance > 0 ? '🟢 預付餘額' : '⚪ 收支平衡'}
+                    </span>
+                    <LabelTooltip text="支出池現有餘額：負值代表有已完成但尚未滿額的支出缺口；正值代表已預先轉入但尚未花用的餘額。" />
+                  </div>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: pondBBalance < 0 ? 'var(--status-error)' : pondBBalance > 0 ? 'var(--status-success)' : 'var(--text-muted)' }}>
+                    {pondBDisplayStr}
                   </span>
-                  <LabelTooltip text="支出池餘額：負值代表已完成的支出總額，可透過注水來補足；正值代表預先注入但尚未花用，可退回收入池或湖泊。" />
                 </div>
                 {/* 計畫中支出提示 */}
                 {plannedExpenseTotal > 0 && (
