@@ -2,6 +2,10 @@
 -- Migration 010: 解除 Pond B 只能是負數 (欠款模型) 的限制，允許正數 (預付餘額)
 -- ============================================================
 
+-- 1. 移除先前可能掛在表上的限制條件 (002_fix_pond_logic_v2 留下的)
+ALTER TABLE pond_b DROP CONSTRAINT IF EXISTS pond_b_no_positive;
+
+-- 2. 更新重算函數
 CREATE OR REPLACE FUNCTION fn_recalc_pond_b(p_user_id UUID)
 RETURNS VOID AS $$
 BEGIN
@@ -28,7 +32,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 自動觸發一次所有成員的池塘 B 重算，把之前被吃掉的錢還原出來！
+-- 3. 自動觸發一次所有成員的池塘 B 重算，把之前被吃掉的錢還原出來！
 DO $$ 
 DECLARE
     r RECORD;
