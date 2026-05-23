@@ -133,7 +133,7 @@ export function Sidebar({ role }: { role?: string }) {
 
   const allItems = [
     ...navItems,
-    ...(role === 'admin' ? moreItems : moreItems.filter(i => i.href !== '/lake')),
+    ...(role === 'admin' || role === 'lake_manager' ? moreItems : moreItems.filter(i => i.href !== '/lake')),
   ];
 
   return (

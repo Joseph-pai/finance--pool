@@ -10,7 +10,7 @@ import { zhTW } from 'date-fns/locale';
 import { LabelTooltip } from '@/components/ui/Tooltip';
 
 export default function RequestsPage() {
-  const { profile, canManageLake } = useAuth();
+  const { profile, isAdmin, canManageLake } = useAuth();
   const supabase = createClient();
 
   const [requests, setRequests] = useState<(LakeRequest & { profile?: Profile })[]>([]);
@@ -18,6 +18,11 @@ export default function RequestsPage() {
   const [filter, setFilter]     = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [reviewModal, setReviewModal] = useState<LakeRequest | null>(null);
   const [reviewForm, setReviewForm]   = useState({ approved_amount: '', approved_date: '', admin_note: '' });
+  
+  // 管理員編輯歷史申請
+  const [editModal, setEditModal]     = useState<LakeRequest | null>(null);
+  const [editForm, setEditForm]       = useState({ item_name: '', status: 'approved' as 'pending' | 'approved' | 'rejected', approved_amount: '', approved_date: '', admin_note: '' });
+
   const [saving, setSaving]     = useState(false);
 
   const load = useCallback(async () => {
@@ -48,7 +53,7 @@ export default function RequestsPage() {
     setSaving(true);
     const approvedAmt = Number(reviewForm.approved_amount);
 
-    // 更新申請狀態與紀錄 (其餘由資料庫觸發器同步至湖泊與個人池塘)
+    // 1. 更新申請狀態與紀錄 (交易紀錄完全交由 Supabase 觸發器 trg_lake_request_transaction_sync 自動產生，確保雙向同步)
     await supabase.from('lake_requests').update({
       status: 'approved',
       approved_amount: approvedAmt,
@@ -57,20 +62,7 @@ export default function RequestsPage() {
       reviewed_at: new Date().toISOString(),
     }).eq('id', reviewModal.id);
 
-    // 記錄交易
-    await supabase.from('transactions').insert({
-      family_id: profile.family_id,
-      user_id: reviewModal.requester_id,
-      type: 'lake_to_member',
-      amount: approvedAmt,
-      source: 'lake',
-      destination: 'pond_b',
-      reference_id: reviewModal.id,
-      note: reviewModal.item_name,
-      transaction_date: reviewForm.approved_date,
-    });
-
-    // 通知申請者
+    // 2. 通知申請者
     await supabase.from('notifications').insert({
       user_id: reviewModal.requester_id,
       family_id: profile.family_id,
@@ -107,6 +99,46 @@ export default function RequestsPage() {
     setSaving(false);
     setReviewModal(null);
     load();
+  };
+
+  // 管理員歷史編輯功能
+  const openEdit = (req: LakeRequest) => {
+    setEditModal(req);
+    setEditForm({
+      item_name: req.item_name,
+      status: req.status,
+      approved_amount: String(req.approved_amount ?? req.requested_amount),
+      approved_date: req.approved_date ?? req.requested_date,
+      admin_note: req.admin_note ?? '',
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editModal || !profile) return;
+    setSaving(true);
+
+    const isApp = editForm.status === 'approved';
+    await supabase.from('lake_requests').update({
+      item_name: editForm.item_name,
+      status: editForm.status,
+      approved_amount: isApp ? Number(editForm.approved_amount) : null,
+      approved_date: isApp ? editForm.approved_date : null,
+      admin_note: editForm.admin_note,
+      reviewed_at: new Date().toISOString(),
+    }).eq('id', editModal.id);
+
+    setSaving(false);
+    setEditModal(null);
+    load();
+  };
+
+  const handleDelete = async (req: LakeRequest) => {
+    if (confirm(`確定要刪除對成員「${req.profile?.display_name}」的「${req.item_name}」調撥申請嗎？\n\n⚠️ 注意：若已批准，關聯的交易流水將自動被資料庫移除，且餘額會同步自動重算！此動作無法復原。`)) {
+      setSaving(true);
+      await supabase.from('lake_requests').delete().eq('id', req.id);
+      setSaving(false);
+      load();
+    }
   };
 
   const filtered = requests.filter(r => filter === 'all' || r.status === filter);
@@ -156,7 +188,7 @@ export default function RequestsPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
           {filtered.map((req) => {
             const sc = statusConfig[req.status] ?? statusConfig.pending;
-            const isMe = req.requester_id === profile?.id;
+            const isPending = req.status === 'pending';
 
             return (
               <div key={req.id} className="card" style={{ borderColor: req.status === 'pending' ? 'rgba(245,166,35,0.25)' : undefined }}>
@@ -195,12 +227,27 @@ export default function RequestsPage() {
                     </div>
                   </div>
 
-                  {/* Admin/Manager Actions */}
-                  {canManageLake && req.status === 'pending' && (
-                    <button className="btn btn-primary btn-sm" onClick={() => openReview(req)} id={`req-review-${req.id}`}>
-                      審批
-                    </button>
-                  )}
+                  {/* Actions */}
+                  <div className="flex gap-2">
+                    {/* 一般審審批 */}
+                    {canManageLake && isPending && (
+                      <button className="btn btn-primary btn-sm" onClick={() => openReview(req)} id={`req-review-${req.id}`}>
+                        審批
+                      </button>
+                    )}
+                    
+                    {/* 管理員專屬歷史編輯與刪除 */}
+                    {isAdmin && !isPending && (
+                      <>
+                        <button className="btn btn-ghost btn-sm" onClick={() => openEdit(req)} id={`req-edit-${req.id}`}>
+                          編輯歷史
+                        </button>
+                        <button className="btn btn-danger btn-sm" onClick={() => handleDelete(req)} id={`req-delete-${req.id}`}>
+                          刪除
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -250,6 +297,61 @@ export default function RequestsPage() {
                 </button>
                 <button className="btn btn-success" onClick={handleApprove} disabled={saving || !reviewForm.approved_amount} id="req-approve-btn">
                   {saving ? '處理中...' : '✅ 批准'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Modal (Admin Only) */}
+      {editModal && (
+        <div className="modal-overlay" onClick={() => setEditModal(null)}>
+          <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">⚙️ 編輯歷史申請 (管理員專用)</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setEditModal(null)} id="req-edit-close">✕</button>
+            </div>
+            <div style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-3)', background: 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <p className="text-xs text-muted">原申請資訊</p>
+              <p className="text-sm"><span className="text-muted">成員：</span>{editModal.profile?.display_name}</p>
+              <p className="text-sm"><span className="text-muted">申請：</span>{editModal.item_name} ({formatTWD(editModal.requested_amount)})</p>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              <div className="form-group">
+                <label className="form-label">申請項目名稱</label>
+                <input type="text" className="form-input" value={editForm.item_name} onChange={e => setEditForm(f => ({ ...f, item_name: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">審批狀態</label>
+                <select className="form-input form-select" value={editForm.status} onChange={e => setEditForm(f => ({ ...f, status: e.target.value as any }))}>
+                  <option value="pending">待審批 (此操作將同步自動「刪除」關聯交易餘額)</option>
+                  <option value="approved">已批准 (此操作將同步自動「新增或更新」關聯交易餘額)</option>
+                  <option value="rejected">已拒絕 (此操作將同步自動「刪除」關聯交易餘額)</option>
+                </select>
+              </div>
+              
+              {editForm.status === 'approved' && (
+                <>
+                  <div className="form-group">
+                    <label className="form-label">批准金額</label>
+                    <input type="number" className="form-input" value={editForm.approved_amount} onChange={e => setEditForm(f => ({ ...f, approved_amount: e.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">到帳日期</label>
+                    <input type="date" className="form-input" value={editForm.approved_date} onChange={e => setEditForm(f => ({ ...f, approved_date: e.target.value }))} />
+                  </div>
+                </>
+              )}
+
+              <div className="form-group">
+                <label className="form-label">管理員備註</label>
+                <input type="text" className="form-input" placeholder="拒絕原因或批准備註" value={editForm.admin_note} onChange={e => setEditForm(f => ({ ...f, admin_note: e.target.value }))} />
+              </div>
+              <div className="flex gap-3" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
+                <button className="btn btn-ghost" onClick={() => setEditModal(null)}>取消</button>
+                <button className="btn btn-primary" onClick={handleSaveEdit} disabled={saving || !editForm.item_name} id="req-edit-save">
+                  {saving ? '儲存中...' : '✓ 儲存變更'}
                 </button>
               </div>
             </div>

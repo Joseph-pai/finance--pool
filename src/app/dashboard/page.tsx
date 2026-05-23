@@ -30,9 +30,20 @@ export default function DashboardPage() {
   const [lake, setLake]                 = useState<Lake | null>(null);
   const [members, setMembers]           = useState<MemberData[]>([]);
   const [lakeExpenses, setLakeExpenses] = useState<LakeExpense[]>([]);
+  const [lakeRequests, setLakeRequests] = useState<LakeRequest[]>([]);
+  const [allIncomes, setAllIncomes]     = useState<IncomeItem[]>([]);
   const [prediction, setPrediction]     = useState<DryPrediction | null>(null);
+  const [predMode, setPredMode]         = useState<'current' | 'estimated'>('current');
   const [loading, setLoading]           = useState(true);
   const [maxBalance, setMaxBalance]     = useState(1);
+
+  // 初始化預測模式
+  useEffect(() => {
+    const stored = localStorage.getItem('family-pool-pred-mode');
+    if (stored === 'current' || stored === 'estimated') {
+      setPredMode(stored);
+    }
+  }, []);
 
   const loadDashboard = useCallback(async () => {
     if (!profile?.family_id) return;
@@ -56,13 +67,15 @@ export default function DashboardPage() {
     const expensesData  = (lakeExpRes.data ?? []) as LakeExpense[];
     const requestsData  = (requestsRes.data ?? []) as LakeRequest[];
     const allExpenses   = (expenseItemsRes.data ?? []) as ExpenseItem[];
-    const allIncomes    = (incomeItemsRes.data ?? []) as IncomeItem[];
+    const incomesData   = (incomeItemsRes.data ?? []) as IncomeItem[];
 
     setLake(lakeData);
     setLakeExpenses(expensesData);
+    setLakeRequests(requestsData);
+    setAllIncomes(incomesData);
 
     const memberList: MemberData[] = profilesData.map((p) => {
-      const pIncomes  = allIncomes.filter(i => i.user_id === p.id);
+      const pIncomes  = incomesData.filter(i => i.user_id === p.id);
       const pExpenses = allExpenses.filter(e => e.user_id === p.id);
 
       // 待入帳（pending）收入合計
@@ -91,12 +104,6 @@ export default function DashboardPage() {
     });
     setMembers(memberList);
 
-    // 計算乾涸預測
-    if (lakeData) {
-      const pred = calculateLakeDryDate(lakeData.current_balance, expensesData, requestsData);
-      setPrediction(pred);
-    }
-
     // 計算最大參考水位：取所有池塘 A 的最大值和湖泊餘額的最大值
     const maxA = Math.max(0, ...memberList.map(m => (m.pond_a?.current_balance ?? 0) + m.pendingIncomeTotal));
     const maxB = Math.max(0, ...memberList.map(m => m.plannedExpenseTotal));
@@ -105,6 +112,20 @@ export default function DashboardPage() {
 
     setLoading(false);
   }, [profile?.family_id, supabase]);
+
+  // 動態監聽並計算乾涸預測
+  useEffect(() => {
+    if (lake) {
+      const pred = calculateLakeDryDate(
+        lake.current_balance,
+        lakeExpenses,
+        lakeRequests,
+        allIncomes,
+        predMode
+      );
+      setPrediction(pred);
+    }
+  }, [lake, lakeExpenses, lakeRequests, allIncomes, predMode]);
 
   useEffect(() => {
     loadDashboard();
@@ -123,8 +144,16 @@ export default function DashboardPage() {
     return () => { supabase.removeChannel(channel); };
   }, [profile?.family_id, supabase, loadDashboard]);
 
+  const pendingLakeIncome = allIncomes
+    .filter(i => i.destination === 'lake' && i.status === 'pending')
+    .reduce((sum, i) => sum + i.amount, 0);
+
+  const displayedLakeBalance = predMode === 'estimated'
+    ? (lake?.current_balance ?? 0) + pendingLakeIncome
+    : (lake?.current_balance ?? 0);
+
   const warningLevel = prediction?.warning_level ?? 'safe';
-  const lakeLevel    = lake ? calcWaterLevel(lake.current_balance, maxBalance) : 0;
+  const lakeLevel    = lake ? calcWaterLevel(displayedLakeBalance, maxBalance) : 0;
 
   const warningColors: Record<string, string> = {
     safe:     'var(--status-success)',
@@ -178,10 +207,26 @@ export default function DashboardPage() {
             variant="lake"
             height={260}
             label="🌊 家庭湖泊"
-            amount={formatTWD(lake?.current_balance ?? 0)}
+            amount={formatTWD(displayedLakeBalance)}
             warningLevel={warningLevel}
           />
           <div style={{ padding: 'var(--space-6)' }}>
+            {/* 餘額雙重顯示 */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-5)', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: 'var(--space-4)' }}>
+              <div>
+                <span className="text-xs text-muted">💧 當前餘額</span>
+                <div className="text-lg font-bold" style={{ color: 'var(--lake-safe)', marginTop: 2 }}>
+                  {formatTWD(lake?.current_balance ?? 0)}
+                </div>
+              </div>
+              <div>
+                <span className="text-xs text-muted">🔮 預估餘額 (含預計收入)</span>
+                <div className="text-lg font-bold" style={{ color: 'var(--pond-a-light)', marginTop: 2 }}>
+                  {formatTWD((lake?.current_balance ?? 0) + pendingLakeIncome)}
+                </div>
+              </div>
+            </div>
+
             <div className="flex items-center justify-between flex-wrap gap-4">
               {/* Prediction */}
               <div>
@@ -192,6 +237,29 @@ export default function DashboardPage() {
                   }}>
                     {warningLabels[warningLevel]}
                   </span>
+                  
+                  {/* 預測模式選擇器 */}
+                  <select
+                    value={predMode}
+                    onChange={(e) => {
+                      const val = e.target.value as 'current' | 'estimated';
+                      setPredMode(val);
+                      localStorage.setItem('family-pool-pred-mode', val);
+                    }}
+                    className="text-xs font-semibold"
+                    style={{
+                      background: 'rgba(255,255,255,0.08)',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '2px 8px',
+                      color: 'var(--text-primary)',
+                      outline: 'none',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="current" style={{ backgroundColor: 'var(--card-bg)' }}>當前水位預測</option>
+                    <option value="estimated" style={{ backgroundColor: 'var(--card-bg)' }}>預估餘額預測</option>
+                  </select>
                 </div>
                 {prediction?.dry_date ? (
                   <div>
@@ -212,8 +280,8 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              {/* Quick actions (admin only) */}
-              {profile?.role === 'admin' && (
+              {/* Quick actions (admin or manager) */}
+              {(profile?.role === 'admin' || profile?.role === 'lake_manager') && (
                 <button className="btn btn-ghost btn-sm" onClick={() => router.push('/lake')} id="dash-manage-lake">
                   管理湖泊 →
                 </button>

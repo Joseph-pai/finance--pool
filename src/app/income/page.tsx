@@ -12,7 +12,7 @@ import { LabelTooltip } from '@/components/ui/Tooltip';
 type ModalMode = 'add' | 'edit' | 'confirm' | null;
 
 export default function IncomePage() {
-  const { profile, isAdmin } = useAuth();
+  const { profile, isAdmin, canManageLake } = useAuth();
   const supabase = createClient();
 
   const [items, setItems]         = useState<(IncomeItem & { profile?: Profile })[]>([]);
@@ -23,11 +23,25 @@ export default function IncomePage() {
   const [saving, setSaving]       = useState(false);
   const [filterUser, setFilterUser] = useState<string>('all');
   const [members, setMembers]     = useState<Profile[]>([]);
-  // 刪除確認 modal
+  
+  // 刪除確認相關
   const [deleteTarget, setDeleteTarget] = useState<IncomeItem | null>(null);
+  const [showDeleteOptions, setShowDeleteOptions] = useState(false);
+
+  // 編輯循環選項相關
+  const [showEditOptions, setShowEditOptions] = useState(false);
 
   // Form state
-  const [form, setForm] = useState({ name: '', expected_date: '', amount: '', user_id: '' });
+  const [form, setForm] = useState({
+    name: '',
+    expected_date: '',
+    amount: '',
+    user_id: '',
+    destination: 'pond_a' as 'pond_a' | 'lake',
+    is_recurring: false,
+    recurrence_rule: 'monthly' as 'monthly' | 'quarterly' | 'yearly',
+    recurrence_end_date: '',
+  });
   const [transferAmount, setTransferAmount] = useState('');
   const [confirmActual, setConfirmActual] = useState('');
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
@@ -49,13 +63,31 @@ export default function IncomePage() {
   useEffect(() => { load(); }, [load]);
 
   const openAdd = () => {
-    setForm({ name: '', expected_date: format(new Date(), 'yyyy-MM-dd'), amount: '', user_id: profile?.id || '' });
+    setForm({
+      name: '',
+      expected_date: format(new Date(), 'yyyy-MM-dd'),
+      amount: '',
+      user_id: profile?.id || '',
+      destination: 'pond_a',
+      is_recurring: false,
+      recurrence_rule: 'monthly',
+      recurrence_end_date: format(new Date(), 'yyyy-MM-dd'),
+    });
     setModal('add');
     setSelected(null);
   };
 
   const openEdit = (item: IncomeItem) => {
-    setForm({ name: item.name, expected_date: item.expected_date, amount: String(item.amount), user_id: item.user_id });
+    setForm({
+      name: item.name,
+      expected_date: item.expected_date,
+      amount: String(item.amount),
+      user_id: item.user_id,
+      destination: item.destination ?? 'pond_a',
+      is_recurring: item.is_recurring ?? false,
+      recurrence_rule: item.recurrence_rule ?? 'monthly',
+      recurrence_end_date: item.recurrence_end_date ?? item.expected_date,
+    });
     setSelected(item);
     setModal('edit');
   };
@@ -66,21 +98,104 @@ export default function IncomePage() {
     setModal('confirm');
   };
 
-  const closeModal = () => { setModal(null); setSelected(null); setSaving(false); };
+  const closeModal = () => {
+    setModal(null);
+    setSelected(null);
+    setShowEditOptions(false);
+    setSaving(false);
+  };
 
-  const handleSave = async () => {
+  const handleSave = async (editType?: 'single' | 'future') => {
     if (!profile?.family_id) return;
     setSaving(true);
     const targetUserId = form.user_id || profile.id;
-    const data = { name: form.name, expected_date: form.expected_date, amount: Number(form.amount), family_id: profile.family_id, user_id: targetUserId };
+    const amountNum = Number(form.amount);
 
     if (modal === 'add') {
-      await supabase.from('income_items').insert(data);
+      if (form.is_recurring) {
+        const recurrence_group_id = crypto.randomUUID();
+        const occurrences: any[] = [];
+        let current = new Date(form.expected_date + 'T00:00:00');
+        const endLimit = new Date(form.recurrence_end_date + 'T23:59:59');
+
+        while (current <= endLimit) {
+          const expectedStr = format(current, 'yyyy-MM-dd');
+          occurrences.push({
+            name: form.name,
+            expected_date: expectedStr,
+            amount: amountNum,
+            family_id: profile.family_id,
+            user_id: targetUserId,
+            destination: form.destination,
+            is_recurring: true,
+            recurrence_rule: form.recurrence_rule,
+            recurrence_start_date: form.expected_date,
+            recurrence_end_date: form.recurrence_end_date,
+            recurrence_group_id,
+            status: 'pending',
+          });
+
+          if (form.recurrence_rule === 'monthly') {
+            current.setMonth(current.getMonth() + 1);
+          } else if (form.recurrence_rule === 'quarterly') {
+            current.setMonth(current.getMonth() + 3);
+          } else if (form.recurrence_rule === 'yearly') {
+            current.setFullYear(current.getFullYear() + 1);
+          } else {
+            break;
+          }
+        }
+        if (occurrences.length > 0) {
+          await supabase.from('income_items').insert(occurrences);
+        }
+      } else {
+        await supabase.from('income_items').insert({
+          name: form.name,
+          expected_date: form.expected_date,
+          amount: amountNum,
+          family_id: profile.family_id,
+          user_id: targetUserId,
+          destination: form.destination,
+          is_recurring: false,
+          status: 'pending',
+        });
+      }
+      closeModal();
+      load();
     } else if (modal === 'edit' && selected) {
-      await supabase.from('income_items').update({ name: form.name, expected_date: form.expected_date, amount: Number(form.amount), user_id: targetUserId }).eq('id', selected.id);
+      if (selected.is_recurring && !editType) {
+        setShowEditOptions(true);
+        setSaving(false);
+        return;
+      }
+
+      if (selected.is_recurring && editType === 'future') {
+        await supabase
+          .from('income_items')
+          .update({
+            name: form.name,
+            amount: amountNum,
+            destination: form.destination,
+            user_id: targetUserId,
+          })
+          .eq('recurrence_group_id', selected.recurrence_group_id)
+          .gte('expected_date', selected.expected_date);
+      } else {
+        await supabase
+          .from('income_items')
+          .update({
+            name: form.name,
+            expected_date: form.expected_date,
+            amount: amountNum,
+            destination: form.destination,
+            user_id: targetUserId,
+          })
+          .eq('id', selected.id);
+      }
+      setShowEditOptions(false);
+      closeModal();
+      load();
     }
-    closeModal();
-    load();
   };
 
   const handleConfirmIncome = async (confirmed: boolean) => {
@@ -105,7 +220,6 @@ export default function IncomePage() {
   const handleTransferToLake = async (item: IncomeItem) => {
     const amt = Number(transferAmount);
     if (!amt || !profile) return;
-    // ✅ 修復：驗證金額不超過 pond_a 餘額
     const pondABalance = pondA?.current_balance ?? 0;
     if (amt > pondABalance) {
       alert(`注入金額（${formatTWD(amt)}）不能超過收入池餘額（${formatTWD(pondABalance)}）`);
@@ -138,7 +252,6 @@ export default function IncomePage() {
   const handleTransferToPondBFromIncome = async (item: IncomeItem) => {
     const amt = Number(transferAmount);
     if (!amt || !profile) return;
-    // ✅ 修復：驗證金額不超過 pond_a 餘額
     const pondABalance = pondA?.current_balance ?? 0;
     if (amt > pondABalance) {
       alert(`注入金額（${formatTWD(amt)}）不能超過收入池餘額（${formatTWD(pondABalance)}）`);
@@ -168,11 +281,26 @@ export default function IncomePage() {
   };
 
   /** 刪除確認 */
-  const confirmDelete = (item: IncomeItem) => setDeleteTarget(item);
-  const handleDelete = async () => {
+  const confirmDelete = (item: IncomeItem) => {
+    setDeleteTarget(item);
+    setShowDeleteOptions(item.is_recurring ?? false);
+  };
+
+  const handleDelete = async (deleteType?: 'single' | 'future') => {
     if (!deleteTarget) return;
-    await supabase.from('income_items').delete().eq('id', deleteTarget.id);
+
+    if (deleteTarget.is_recurring && deleteType === 'future') {
+      await supabase
+        .from('income_items')
+        .delete()
+        .eq('recurrence_group_id', deleteTarget.recurrence_group_id)
+        .gte('expected_date', deleteTarget.expected_date);
+    } else {
+      await supabase.from('income_items').delete().eq('id', deleteTarget.id);
+    }
+
     setDeleteTarget(null);
+    setShowDeleteOptions(false);
     load();
   };
 
@@ -187,6 +315,8 @@ export default function IncomePage() {
     confirmed: { text: '已到帳', badge: 'badge-success' },
     failed:    { text: '未到帳', badge: 'badge-error' },
   };
+
+  const recurringLabel: Record<string, string> = { monthly: '每月', quarterly: '每季', yearly: '每年' };
 
   return (
     <div className="page-container">
@@ -246,7 +376,12 @@ export default function IncomePage() {
           {filtered.map((item) => {
             const isOverdue = item.status === 'pending' && isAfter(new Date(), parseISO(item.expected_date));
             const isMe = item.user_id === profile?.id;
-            const canEdit = isMe || isAdmin;
+            
+            // 普通成員無法編輯/刪除已確認(confirmed)或失敗(failed)的歷史收入，限管理員。
+            // 待確認(pending)的項目，本人與湖泊管理員均可編輯/刪除。
+            const isHistory = item.status === 'confirmed' || item.status === 'failed';
+            const canEdit = isAdmin || (!isHistory && (isMe || canManageLake));
+            const canDelete = isAdmin || (!isHistory && (isMe || canManageLake));
             const sl = statusLabel[item.status];
 
             return (
@@ -261,9 +396,17 @@ export default function IncomePage() {
                         <span className="font-semibold">{item.name}</span>
                         <span className={`badge ${sl.badge}`}>{sl.text}</span>
                         {isOverdue && <span className="badge badge-error">逾期</span>}
+                        {item.is_recurring && (
+                          <span className="badge badge-info" style={{ gap: 4, display: 'flex', alignItems: 'center' }}>
+                            🔄 循環 ({recurringLabel[item.recurrence_rule ?? 'monthly']})
+                          </span>
+                        )}
+                        <span className="badge badge-ghost text-xs">
+                          🎯 {item.destination === 'lake' ? '🌊 家庭湖泊' : '💰 個人池塘A'}
+                        </span>
                       </div>
-                      <div className="text-xs text-secondary" style={{ marginTop: 2 }}>
-                        {(item as IncomeItem & { profile?: Profile }).profile?.display_name}
+                      <div className="text-xs text-secondary" style={{ marginTop: 4 }}>
+                        成員：{(item as IncomeItem & { profile?: Profile }).profile?.display_name}
                         · 預計到帳：{format(parseISO(item.expected_date), 'yyyy/MM/dd', { locale: zhTW })}
                       </div>
                     </div>
@@ -279,7 +422,7 @@ export default function IncomePage() {
                             確認到帳
                           </button>
                         )}
-                        {item.status === 'confirmed' && (
+                        {item.status === 'confirmed' && item.destination !== 'lake' && isMe && (
                           <div className="flex items-center gap-2 flex-wrap">
                             <div style={{ position: 'relative' }}>
                               <input
@@ -310,7 +453,6 @@ export default function IncomePage() {
                             </button>
                             <button
                               className="btn btn-ghost btn-sm"
-                              style={{ borderColor: 'rgba(124,58,237,0.5)', color: 'var(--pond-b-light)' }}
                               onClick={() => { setActiveItemId(item.id); handleTransferToPondBFromIncome(item); }}
                               disabled={saving || activeItemId !== item.id || !transferAmount}
                               id={`income-transfer-pond-b-${item.id}`}
@@ -320,8 +462,10 @@ export default function IncomePage() {
                           </div>
                         )}
                         <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)} id={`income-edit-${item.id}`}>編輯</button>
-                        <button className="btn btn-danger btn-sm" onClick={() => confirmDelete(item)} id={`income-delete-${item.id}`}>刪除</button>
                       </>
+                    )}
+                    {canDelete && (
+                      <button className="btn btn-danger btn-sm" onClick={() => confirmDelete(item)} id={`income-delete-${item.id}`}>刪除</button>
                     )}
                   </div>
                 </div>
@@ -339,46 +483,134 @@ export default function IncomePage() {
               <h3 className="modal-title">{modal === 'add' ? '新增收入' : '編輯收入'}</h3>
               <button className="btn btn-ghost btn-sm" onClick={closeModal} id="income-modal-close">✕</button>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-              {isAdmin && (
+            
+            {showEditOptions ? (
+              /* 編輯循環收入選項詢問 */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+                <p className="text-secondary">
+                  這是一筆循環收入。請問您希望如何儲存此修改？
+                </p>
+                <div className="flex flex-col gap-3" style={{ marginTop: 'var(--space-2)' }}>
+                  <button className="btn btn-success w-full" onClick={() => handleSave('single')} disabled={saving}>
+                    僅修改此單筆項目
+                  </button>
+                  <button className="btn btn-primary w-full" onClick={() => handleSave('future')} disabled={saving}>
+                    修改此項目及未來所有關聯項目
+                  </button>
+                  <button className="btn btn-ghost w-full" onClick={() => setShowEditOptions(false)}>
+                    返回編輯
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* 收入表單內容 */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+                {canManageLake && (
+                  <div className="form-group">
+                    <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                      所屬成員
+                      <LabelTooltip text="選擇此收入屬於哪位家庭成員（管理員專用）" />
+                    </label>
+                    <select id="income-form-user" className="form-input form-select" value={form.user_id} onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))}>
+                      {members.map(m => <option key={m.id} value={m.id}>{m.display_name}</option>)}
+                    </select>
+                  </div>
+                )}
+                
                 <div className="form-group">
                   <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
-                    所屬成員
-                    <LabelTooltip text="選擇此收入屬於哪位家庭成員（管理員專用）" />
+                    收入名稱
+                    <LabelTooltip text="描述這筆收入的來源，例如：薪資、獎金、兼職收入" />
                   </label>
-                  <select id="income-form-user" className="form-input form-select" value={form.user_id} onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))}>
-                    {members.map(m => <option key={m.id} value={m.id}>{m.display_name}</option>)}
+                  <input id="income-form-name" type="text" className="form-input" placeholder="例：薪資、獎金" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                    入帳目標
+                    <LabelTooltip text="選擇此收入是匯入個人池塘A，或是直接匯入家庭共同湖泊" />
+                  </label>
+                  <select
+                    id="income-form-destination"
+                    className="form-input form-select"
+                    value={form.destination}
+                    onChange={e => setForm(f => ({ ...f, destination: e.target.value as 'pond_a' | 'lake' }))}
+                  >
+                    <option value="pond_a">💰 個人池塘 A (Pond A)</option>
+                    <option value="lake">🌊 家庭共同湖泊 (Lake)</option>
                   </select>
                 </div>
-              )}
-              <div className="form-group">
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
-                  收入名稱
-                  <LabelTooltip text="描述這筆收入的來源，例如：薪資、獎金、兼職收入" />
-                </label>
-                <input id="income-form-name" type="text" className="form-input" placeholder="例：薪資、獎金" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+
+                <div className="form-group">
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                    預計到帳日期
+                    <LabelTooltip text="這筆收入預計匯入帳戶的日期，到帳後需回來點擊「確認到帳」" />
+                  </label>
+                  <input id="income-form-date" type="date" className="form-input" value={form.expected_date} onChange={e => setForm(f => ({ ...f, expected_date: e.target.value }))} />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                    金額（台幣）
+                    <LabelTooltip text="預計收入金額，確認到帳時可填寫實際到帳金額（可能與預計不同）" />
+                  </label>
+                  <input id="income-form-amount" type="number" className="form-input" placeholder="0" min="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+                </div>
+
+                {/* 循環收入開關 (僅在新增模式下顯示，編輯循環收入走分開的批次處理) */}
+                {modal === 'add' && (
+                  <>
+                    <div className="form-group flex items-center" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
+                      <input
+                        id="income-form-recurring"
+                        type="checkbox"
+                        checked={form.is_recurring}
+                        onChange={e => setForm(f => ({ ...f, is_recurring: e.target.checked }))}
+                        style={{ width: 18, height: 18, cursor: 'pointer' }}
+                      />
+                      <label htmlFor="income-form-recurring" className="form-label font-semibold" style={{ margin: 0, cursor: 'pointer', userSelect: 'none' }}>
+                        🔄 設定為循環定期收入
+                      </label>
+                    </div>
+
+                    {form.is_recurring && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', padding: '12px', background: 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div className="form-group">
+                          <label className="form-label">循環週期</label>
+                          <select
+                            id="income-form-recurrence-rule"
+                            className="form-input form-select"
+                            value={form.recurrence_rule}
+                            onChange={e => setForm(f => ({ ...f, recurrence_rule: e.target.value as any }))}
+                          >
+                            <option value="monthly">每月</option>
+                            <option value="quarterly">每季</option>
+                            <option value="yearly">每年</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">結束日期</label>
+                          <input
+                            id="income-form-recurrence-end"
+                            type="date"
+                            className="form-input"
+                            value={form.recurrence_end_date}
+                            onChange={e => setForm(f => ({ ...f, recurrence_end_date: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                <div className="flex gap-3" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
+                  <button className="btn btn-ghost" onClick={closeModal} id="income-modal-cancel">取消</button>
+                  <button className="btn btn-success" onClick={() => handleSave()} disabled={saving || !form.name || !form.amount} id="income-modal-save">
+                    {saving ? '儲存中...' : '儲存'}
+                  </button>
+                </div>
               </div>
-              <div className="form-group">
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
-                  預計到帳日期
-                  <LabelTooltip text="這筆收入預計匯入帳戶的日期，到帳後需回來點擊「確認到帳」" />
-                </label>
-                <input id="income-form-date" type="date" className="form-input" value={form.expected_date} onChange={e => setForm(f => ({ ...f, expected_date: e.target.value }))} />
-              </div>
-              <div className="form-group">
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
-                  金額（台幣）
-                  <LabelTooltip text="預計收入金額，確認到帳時可填寫實際到帳金額（可能與預計不同）" />
-                </label>
-                <input id="income-form-amount" type="number" className="form-input" placeholder="0" min="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
-              </div>
-              <div className="flex gap-3" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
-                <button className="btn btn-ghost" onClick={closeModal} id="income-modal-cancel">取消</button>
-                <button className="btn btn-success" onClick={handleSave} disabled={saving || !form.name || !form.amount} id="income-modal-save">
-                  {saving ? '儲存中...' : '儲存'}
-                </button>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -421,17 +653,34 @@ export default function IncomePage() {
               <h3 className="modal-title">⚠️ 確認刪除</h3>
               <button className="btn btn-ghost btn-sm" onClick={() => setDeleteTarget(null)}>✕</button>
             </div>
-            <p className="text-secondary" style={{ marginBottom: 'var(--space-2)' }}>
-              確定要刪除這筆收入記錄嗎？若已確認到帳，收入池餘額將同步重算。
+            <p className="text-secondary" style={{ marginBottom: 'var(--space-3)' }}>
+              確定要刪除這筆收入記錄嗎？若已確認到帳，池塘水位將自動重算。
             </p>
-            <div style={{ padding: '10px 14px', background: 'rgba(224,82,82,0.08)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-6)', border: '1px solid rgba(224,82,82,0.2)' }}>
+            <div style={{ padding: '10px 14px', background: 'rgba(224,82,82,0.08)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-5)', border: '1px solid rgba(224,82,82,0.2)' }}>
               <span className="font-semibold">{deleteTarget.name}</span>
               <span className="text-secondary" style={{ marginLeft: 8 }}>— {formatTWD(deleteTarget.amount)}</span>
             </div>
-            <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
-              <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)} id="income-delete-cancel">取消</button>
-              <button className="btn btn-danger" onClick={handleDelete} id="income-delete-confirm">確認刪除</button>
-            </div>
+            
+            {showDeleteOptions ? (
+              /* 刪除循環項目選項 */
+              <div className="flex flex-col gap-2 w-full">
+                <button className="btn btn-danger w-full" onClick={() => handleDelete('single')} id="income-delete-single">
+                  僅刪除此單筆項目
+                </button>
+                <button className="btn btn-primary w-full" onClick={() => handleDelete('future')} id="income-delete-future" style={{ backgroundColor: 'var(--status-error-dark, #bd2130)', borderColor: 'var(--status-error-dark, #bd2130)' }}>
+                  刪除此筆及未來所有關聯項目
+                </button>
+                <button className="btn btn-ghost w-full" onClick={() => setDeleteTarget(null)}>
+                  取消
+                </button>
+              </div>
+            ) : (
+              /* 一般刪除確認 */
+              <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
+                <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)} id="income-delete-cancel">取消</button>
+                <button className="btn btn-danger" onClick={() => handleDelete('single')} id="income-delete-confirm">確認刪除</button>
+              </div>
+            )}
           </div>
         </div>
       )}

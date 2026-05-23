@@ -65,6 +65,12 @@ export interface IncomeItem {
   source?: 'external' | 'lake';
   actual_amount?: number | null;
   confirmed_at?: string | null;
+  destination: 'pond_a' | 'lake';
+  is_recurring: boolean;
+  recurrence_rule?: RecurrenceRule | null;
+  recurrence_start_date?: string | null;
+  recurrence_end_date?: string | null;
+  recurrence_group_id?: string | null;
   created_at: string;
   updated_at: string;
   profile?: Profile;
@@ -79,6 +85,11 @@ export interface ExpenseItem {
   amount: number;
   source: ExpenseSource;
   status: ExpenseStatus;
+  is_recurring: boolean;
+  recurrence_rule?: RecurrenceRule | null;
+  recurrence_start_date?: string | null;
+  recurrence_end_date?: string | null;
+  recurrence_group_id?: string | null;
   created_at: string;
   updated_at: string;
   profile?: Profile;

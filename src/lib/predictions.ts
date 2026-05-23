@@ -1,4 +1,4 @@
-import { LakeExpense, LakeRequest, DryPrediction } from '@/types';
+import { LakeExpense, LakeRequest, DryPrediction, IncomeItem } from '@/types';
 import { addDays, differenceInDays, parseISO, format } from 'date-fns';
 
 /**
@@ -6,22 +6,27 @@ import { addDays, differenceInDays, parseISO, format } from 'date-fns';
  * @param currentBalance 當前湖泊餘額
  * @param lakeExpenses 湖泊計劃支出列表（管理員設定）
  * @param approvedRequests 已批准的成員調撥申請
+ * @param incomeItems 所有收入項目（預計模式下使用）
+ * @param mode 預估模式：'current' (當前餘額) 或 'estimated' (包含預估餘額)
  */
 export function calculateLakeDryDate(
   currentBalance: number,
   lakeExpenses: LakeExpense[],
-  approvedRequests: LakeRequest[]
+  approvedRequests: LakeRequest[],
+  incomeItems: IncomeItem[] = [],
+  mode: 'current' | 'estimated' = 'current'
 ): DryPrediction {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // 合併所有未來出水事件，按日期排序
-  const outflows: { date: string; name: string; amount: number }[] = [];
+  // 合併所有未來收支事件，按日期排序
+  const events: { date: string; name: string; amount: number; type: 'inflow' | 'outflow' }[] = [];
 
+  // 1. 支出 (Outflows)
   lakeExpenses
     .filter(e => e.status === 'active' && e.amount > 0)
     .forEach(e => {
-      outflows.push({ date: e.expected_date, name: e.name, amount: e.amount });
+      events.push({ date: e.expected_date, name: e.name, amount: e.amount, type: 'outflow' });
       // 處理循環支出，預測未來365天
       if (e.is_recurring && e.recurrence_rule) {
         let nextDate = parseISO(e.expected_date);
@@ -35,48 +40,81 @@ export function calculateLakeDryDate(
           }
           const futureDate = format(nextDate, 'yyyy-MM-dd');
           if (differenceInDays(nextDate, addDays(today, 365)) > 0) break;
-          outflows.push({ date: futureDate, name: e.name, amount: e.amount });
+          events.push({ date: futureDate, name: e.name, amount: e.amount, type: 'outflow' });
         }
       }
     });
 
+  // 2. 申請 (Outflows)
   approvedRequests
     .filter(r => r.status === 'approved' && r.approved_date && r.approved_amount)
     .forEach(r => {
-      outflows.push({
+      events.push({
         date: r.approved_date!,
         name: `申請：${r.item_name}`,
         amount: r.approved_amount!,
+        type: 'outflow',
       });
     });
 
-  // 只取未來的支出，按日期升序
-  const futureOutflows = outflows
-    .filter(o => o.date >= format(today, 'yyyy-MM-dd'))
-    .sort((a, b) => a.date.localeCompare(b.date));
+  // 3. 預計收入 (Inflows - 僅在估算模式下)
+  if (mode === 'estimated' && incomeItems) {
+    incomeItems
+      .filter(r => r.status === 'pending' && r.destination === 'lake' && r.amount > 0)
+      .forEach(r => {
+        events.push({
+          date: r.expected_date,
+          name: `預計收入：${r.name}`,
+          amount: r.amount,
+          type: 'inflow',
+        });
+      });
+  }
+
+  // 只取未來的事件，按日期升序排序。若日期相同，則流入(inflow)優先，避免假乾涸
+  const todayStr = format(today, 'yyyy-MM-dd');
+  const futureEvents = events
+    .filter(e => e.date >= todayStr)
+    .sort((a, b) => {
+      const dateCompare = a.date.localeCompare(b.date);
+      if (dateCompare !== 0) return dateCompare;
+      if (a.type === b.type) return 0;
+      return a.type === 'inflow' ? -1 : 1; // inflow comes first
+    });
 
   // 累計計算，找到餘額歸零的日期
   let remaining = currentBalance;
-  const scheduled: DryPrediction['scheduled_outflows'] = [];
+  const scheduled: (DryPrediction['scheduled_outflows'][0] & { type?: 'inflow' | 'outflow' })[] = [];
+  let dryDate: string | null = null;
 
-  for (const outflow of futureOutflows) {
-    remaining -= outflow.amount;
-    scheduled.push({
-      date: outflow.date,
-      name: outflow.name,
-      amount: outflow.amount,
-      cumulative: currentBalance - remaining,
-    });
-    if (remaining <= 0) {
-      const dryDate = outflow.date;
-      const daysRemaining = differenceInDays(parseISO(dryDate), today);
-      return {
-        dry_date: dryDate,
-        days_remaining: daysRemaining,
-        warning_level: getWarningLevel(daysRemaining),
-        scheduled_outflows: scheduled,
-      };
+  for (const event of futureEvents) {
+    if (event.type === 'inflow') {
+      remaining += event.amount;
+    } else {
+      remaining -= event.amount;
     }
+
+    scheduled.push({
+      date: event.date,
+      name: event.name,
+      amount: event.amount,
+      cumulative: currentBalance - remaining, // 累計淨支出
+      type: event.type,
+    } as any);
+
+    if (remaining <= 0 && !dryDate) {
+      dryDate = event.date;
+    }
+  }
+
+  if (dryDate) {
+    const daysRemaining = differenceInDays(parseISO(dryDate), today);
+    return {
+      dry_date: dryDate,
+      days_remaining: daysRemaining,
+      warning_level: getWarningLevel(daysRemaining),
+      scheduled_outflows: scheduled,
+    };
   }
 
   // 沒有找到乾涸日期

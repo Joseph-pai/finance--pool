@@ -12,7 +12,7 @@ import { LabelTooltip } from '@/components/ui/Tooltip';
 type ModalMode = 'add' | 'edit' | null;
 
 export default function ExpensesPage() {
-  const { profile, isAdmin } = useAuth();
+  const { profile, isAdmin, canManageLake } = useAuth();
   const supabase = createClient();
 
   const [items, setItems]       = useState<(ExpenseItem & { profile?: Profile })[]>([]);
@@ -22,9 +22,15 @@ export default function ExpensesPage() {
   const [saving, setSaving]     = useState(false);
   const [filterUser, setFilterUser] = useState('all');
   const [members, setMembers]   = useState<Profile[]>([]);
-  // 刪除確認 modal
+  
+  // 刪除確認相關
   const [deleteTarget, setDeleteTarget] = useState<ExpenseItem | null>(null);
+  const [showDeleteOptions, setShowDeleteOptions] = useState(false);
 
+  // 編輯循環選項相關
+  const [showEditOptions, setShowEditOptions] = useState(false);
+
+  // Form state
   const [form, setForm] = useState({
     name: '',
     expected_date: '',
@@ -32,6 +38,9 @@ export default function ExpensesPage() {
     source: 'pond_a' as 'pond_a' | 'lake',
     reason: '',
     user_id: '',
+    is_recurring: false,
+    recurrence_rule: 'monthly' as 'monthly' | 'quarterly' | 'yearly',
+    recurrence_end_date: '',
   });
 
   const load = useCallback(async () => {
@@ -49,71 +58,194 @@ export default function ExpensesPage() {
   useEffect(() => { load(); }, [load]);
 
   const openAdd = () => {
-    setForm({ name: '', expected_date: format(new Date(), 'yyyy-MM-dd'), amount: '', source: 'pond_a', reason: '', user_id: profile?.id || '' });
+    setForm({
+      name: '',
+      expected_date: format(new Date(), 'yyyy-MM-dd'),
+      amount: '',
+      source: 'pond_a',
+      reason: '',
+      user_id: profile?.id || '',
+      is_recurring: false,
+      recurrence_rule: 'monthly',
+      recurrence_end_date: format(new Date(), 'yyyy-MM-dd'),
+    });
     setSelected(null);
     setModal('add');
   };
 
   const openEdit = (item: ExpenseItem) => {
-    setForm({ name: item.name, expected_date: item.expected_date, amount: String(item.amount), source: item.source, reason: '', user_id: item.user_id });
+    setForm({
+      name: item.name,
+      expected_date: item.expected_date,
+      amount: String(item.amount),
+      source: item.source,
+      reason: '',
+      user_id: item.user_id,
+      is_recurring: item.is_recurring ?? false,
+      recurrence_rule: item.recurrence_rule ?? 'monthly',
+      recurrence_end_date: item.recurrence_end_date ?? item.expected_date,
+    });
     setSelected(item);
     setModal('edit');
   };
 
-  const closeModal = () => { setModal(null); setSelected(null); setSaving(false); };
+  const closeModal = () => {
+    setModal(null);
+    setSelected(null);
+    setShowEditOptions(false);
+    setSaving(false);
+  };
 
-  const handleSave = async () => {
+  const handleSave = async (editType?: 'single' | 'future') => {
     if (!profile?.family_id) return;
     setSaving(true);
     const targetUserId = form.user_id || profile.id;
+    const amountNum = Number(form.amount);
 
     if (modal === 'add') {
-      const { data: newItem } = await supabase.from('expense_items').insert({
-        name: form.name,
-        expected_date: form.expected_date,
-        amount: Number(form.amount),
-        source: form.source,
-        family_id: profile.family_id,
-        user_id: targetUserId,
-        status: 'planned',
-      }).select().single();
+      if (form.is_recurring) {
+        const recurrence_group_id = crypto.randomUUID();
+        const occurrences: any[] = [];
+        let current = new Date(form.expected_date + 'T00:00:00');
+        const endLimit = new Date(form.recurrence_end_date + 'T23:59:59');
 
-      if (form.source === 'lake' && newItem) {
-        await supabase.from('lake_requests').insert({
-          requester_id: targetUserId,
-          family_id: profile.family_id,
-          item_name: form.name,
-          requested_amount: Number(form.amount),
-          requested_date: form.expected_date,
-          reason: form.reason || `支出申請：${form.name}`,
-          status: 'pending',
-        });
+        while (current <= endLimit) {
+          const expectedStr = format(current, 'yyyy-MM-dd');
+          occurrences.push({
+            name: form.name,
+            expected_date: expectedStr,
+            amount: amountNum,
+            source: form.source,
+            family_id: profile.family_id,
+            user_id: targetUserId,
+            status: 'planned',
+            is_recurring: true,
+            recurrence_rule: form.recurrence_rule,
+            recurrence_start_date: form.expected_date,
+            recurrence_end_date: form.recurrence_end_date,
+            recurrence_group_id,
+          });
 
-        const { data: managers } = await supabase.from('profiles').select('id').eq('family_id', profile.family_id).in('role', ['admin', 'lake_manager']);
-        if (managers && managers.length > 0) {
-          await supabase.from('notifications').insert(
-            managers.map(m => ({
-              user_id: m.id,
+          if (form.recurrence_rule === 'monthly') {
+            current.setMonth(current.getMonth() + 1);
+          } else if (form.recurrence_rule === 'quarterly') {
+            current.setMonth(current.getMonth() + 3);
+          } else if (form.recurrence_rule === 'yearly') {
+            current.setFullYear(current.getFullYear() + 1);
+          } else {
+            break;
+          }
+        }
+        if (occurrences.length > 0) {
+          const { data: insertedItems } = await supabase.from('expense_items').insert(occurrences).select();
+          
+          if (form.source === 'lake' && insertedItems && insertedItems.length > 0) {
+            // 批量新增調撥申請
+            const requests = insertedItems.map(item => ({
+              requester_id: targetUserId,
               family_id: profile.family_id,
-              type: 'lake_request',
-              title: '新的湖泊調撥申請',
-              message: `${profile.display_name} 申請使用湖泊資金 ${formatTWD(Number(form.amount))} 用於「${form.name}」`,
-              reference_id: newItem.id,
-            }))
-          );
+              item_name: item.name,
+              requested_amount: item.amount,
+              requested_date: item.expected_date,
+              reason: form.reason || `循環支出申請：${item.name}`,
+              status: 'pending',
+            }));
+            await supabase.from('lake_requests').insert(requests);
+
+            // 批量發送通知給管理員與湖泊管理員
+            const { data: managers } = await supabase.from('profiles').select('id').eq('family_id', profile.family_id).in('role', ['admin', 'lake_manager']);
+            if (managers && managers.length > 0) {
+              const notifications: any[] = [];
+              insertedItems.forEach(item => {
+                managers.forEach(m => {
+                  notifications.push({
+                    user_id: m.id,
+                    family_id: profile.family_id,
+                    type: 'lake_request',
+                    title: '新的湖泊調撥申請 (循環)',
+                    message: `${profile.display_name} 申請使用湖泊資金 ${formatTWD(item.amount)} 用於「${item.name}」`,
+                    reference_id: item.id,
+                  });
+                });
+              });
+              await supabase.from('notifications').insert(notifications);
+            }
+          }
+        }
+      } else {
+        // 單筆新增
+        const { data: newItem } = await supabase.from('expense_items').insert({
+          name: form.name,
+          expected_date: form.expected_date,
+          amount: amountNum,
+          source: form.source,
+          family_id: profile.family_id,
+          user_id: targetUserId,
+          status: 'planned',
+          is_recurring: false,
+        }).select().single();
+
+        if (form.source === 'lake' && newItem) {
+          await supabase.from('lake_requests').insert({
+            requester_id: targetUserId,
+            family_id: profile.family_id,
+            item_name: form.name,
+            requested_amount: amountNum,
+            requested_date: form.expected_date,
+            reason: form.reason || `支出申請：${form.name}`,
+            status: 'pending',
+          });
+
+          const { data: managers } = await supabase.from('profiles').select('id').eq('family_id', profile.family_id).in('role', ['admin', 'lake_manager']);
+          if (managers && managers.length > 0) {
+            await supabase.from('notifications').insert(
+              managers.map(m => ({
+                user_id: m.id,
+                family_id: profile.family_id,
+                type: 'lake_request',
+                title: '新的湖泊調撥申請',
+                message: `${profile.display_name} 申請使用湖泊資金 ${formatTWD(amountNum)} 用於「${form.name}」`,
+                reference_id: newItem.id,
+              }))
+            );
+          }
         }
       }
+      closeModal();
+      load();
     } else if (modal === 'edit' && selected) {
-      await supabase.from('expense_items').update({
-        name: form.name,
-        expected_date: form.expected_date,
-        amount: Number(form.amount),
-        user_id: targetUserId,
-      }).eq('id', selected.id);
-    }
+      if (selected.is_recurring && !editType) {
+        setShowEditOptions(true);
+        setSaving(false);
+        return;
+      }
 
-    closeModal();
-    load();
+      if (selected.is_recurring && editType === 'future') {
+        // 批次修改此項目及未來所有項目
+        await supabase
+          .from('expense_items')
+          .update({
+            name: form.name,
+            amount: amountNum,
+            source: form.source,
+            user_id: targetUserId,
+          })
+          .eq('recurrence_group_id', selected.recurrence_group_id)
+          .gte('expected_date', selected.expected_date);
+      } else {
+        // 單筆修改
+        await supabase.from('expense_items').update({
+          name: form.name,
+          expected_date: form.expected_date,
+          amount: amountNum,
+          source: form.source,
+          user_id: targetUserId,
+        }).eq('id', selected.id);
+      }
+      setShowEditOptions(false);
+      closeModal();
+      load();
+    }
   };
 
   /** 標記支出為「已完成」，觸發 fn_recalc_pond_b */
@@ -125,11 +257,28 @@ export default function ExpensesPage() {
   };
 
   /** 刪除確認 */
-  const confirmDelete = (item: ExpenseItem) => setDeleteTarget(item);
-  const handleDelete = async () => {
+  const confirmDelete = (item: ExpenseItem) => {
+    setDeleteTarget(item);
+    setShowDeleteOptions(item.is_recurring ?? false);
+  };
+
+  const handleDelete = async (deleteType?: 'single' | 'future') => {
     if (!deleteTarget) return;
-    await supabase.from('expense_items').delete().eq('id', deleteTarget.id);
+
+    if (deleteTarget.is_recurring && deleteType === 'future') {
+      // 批次刪除
+      await supabase
+        .from('expense_items')
+        .delete()
+        .eq('recurrence_group_id', deleteTarget.recurrence_group_id)
+        .gte('expected_date', deleteTarget.expected_date);
+    } else {
+      // 單筆刪除
+      await supabase.from('expense_items').delete().eq('id', deleteTarget.id);
+    }
+
     setDeleteTarget(null);
+    setShowDeleteOptions(false);
     load();
   };
 
@@ -153,6 +302,8 @@ export default function ExpensesPage() {
     pond_a: { text: '收入池', color: 'var(--pond-a-light)' },
     lake:   { text: '湖泊',   color: 'var(--text-accent)' },
   };
+
+  const recurringLabel: Record<string, string> = { monthly: '每月', quarterly: '每季', yearly: '每年' };
 
   return (
     <div className="page-container">
@@ -203,7 +354,12 @@ export default function ExpensesPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
           {filtered.map((item) => {
             const isMe = item.user_id === profile?.id;
-            const canEdit = isMe || isAdmin;
+            
+            // 普通成員無法編輯/刪除已完成(completed)或已拒絕(rejected)的歷史支出，限管理員。
+            // 計劃中(planned)或已批准(approved)的項目，本人與湖泊管理員均可編輯/刪除。
+            const isHistory = item.status === 'completed' || item.status === 'rejected';
+            const canEdit = isAdmin || (!isHistory && (isMe || canManageLake));
+            const canDelete = isAdmin || (!isHistory && (isMe || canManageLake));
             const sl = statusLabel[item.status] ?? statusLabel.planned;
             const src = sourceLabel[item.source] ?? sourceLabel.pond_a;
             const canComplete = canEdit && (item.status === 'planned' || item.status === 'approved');
@@ -219,12 +375,17 @@ export default function ExpensesPage() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold">{item.name}</span>
                         <span className={`badge ${sl.badge}`}>{sl.text}</span>
-                        <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: src.color }}>
+                        <span className="badge text-xs" style={{ background: 'rgba(255,255,255,0.05)', color: src.color }}>
                           來源：{src.text}
                         </span>
+                        {item.is_recurring && (
+                          <span className="badge badge-info text-xs" style={{ gap: 4, display: 'flex', alignItems: 'center' }}>
+                            🔄 循環 ({recurringLabel[item.recurrence_rule ?? 'monthly']})
+                          </span>
+                        )}
                       </div>
-                      <div className="text-xs text-secondary" style={{ marginTop: 2 }}>
-                        {(item as ExpenseItem & { profile?: Profile }).profile?.display_name}
+                      <div className="text-xs text-secondary" style={{ marginTop: 4 }}>
+                        成員：{(item as ExpenseItem & { profile?: Profile }).profile?.display_name}
                         · 日期：{format(parseISO(item.expected_date), 'yyyy/MM/dd', { locale: zhTW })}
                       </div>
                     </div>
@@ -234,7 +395,6 @@ export default function ExpensesPage() {
                     <span className="amount-display amount-small amount-negative">-{formatTWD(item.amount)}</span>
                     {canEdit && (
                       <>
-                        {/* 完成按鈕：只在 planned/approved 狀態顯示 */}
                         {canComplete && (
                           <button
                             className="btn btn-success btn-sm"
@@ -247,8 +407,10 @@ export default function ExpensesPage() {
                           </button>
                         )}
                         <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)} id={`expense-edit-${item.id}`}>編輯</button>
-                        <button className="btn btn-danger btn-sm" onClick={() => confirmDelete(item)} id={`expense-delete-${item.id}`}>刪除</button>
                       </>
+                    )}
+                    {canDelete && (
+                      <button className="btn btn-danger btn-sm" onClick={() => confirmDelete(item)} id={`expense-delete-${item.id}`}>刪除</button>
                     )}
                   </div>
                 </div>
@@ -266,79 +428,154 @@ export default function ExpensesPage() {
               <h3 className="modal-title">{modal === 'add' ? '新增支出' : '編輯支出'}</h3>
               <button className="btn btn-ghost btn-sm" onClick={closeModal} id="expense-modal-close">✕</button>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-              {isAdmin && (
-                <div className="form-group">
-                  <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
-                    所屬成員
-                    <LabelTooltip text="選擇此支出屬於哪位家庭成員（管理員專用）" />
-                  </label>
-                  <select id="expense-form-user" className="form-input form-select" value={form.user_id} onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))}>
-                    {members.map(m => <option key={m.id} value={m.id}>{m.display_name}</option>)}
-                  </select>
-                </div>
-              )}
-              <div className="form-group">
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
-                  支出名稱
-                  <LabelTooltip text="描述這筆支出的用途，例如：餐費、交通費、房租" />
-                </label>
-                <input id="expense-form-name" type="text" className="form-input" placeholder="例：餐費、交通費" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-              </div>
-              <div className="form-group">
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
-                  預計日期
-                  <LabelTooltip text="這筆支出預計發生的日期" />
-                </label>
-                <input id="expense-form-date" type="date" className="form-input" value={form.expected_date} onChange={e => setForm(f => ({ ...f, expected_date: e.target.value }))} />
-              </div>
-              <div className="form-group">
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
-                  金額（台幣）
-                  <LabelTooltip text="支出金額，請輸入整數（元）" />
-                </label>
-                <input id="expense-form-amount" type="number" className="form-input" placeholder="0" min="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
-              </div>
-              <div className="form-group">
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
-                  資金來源
-                  <LabelTooltip text="選擇資金來源：收入池（個人）或湖泊（家庭共用，需管理員批准）" />
-                </label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
-                  <button id="expense-source-pond" onClick={() => setForm(f => ({ ...f, source: 'pond_a' }))} style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: `2px solid ${form.source === 'pond_a' ? 'var(--pond-a)' : 'var(--color-border)'}`, background: form.source === 'pond_a' ? 'rgba(26,158,92,0.1)' : 'transparent', cursor: 'pointer', color: 'var(--text-primary)', textAlign: 'center' }}>
-                    <div style={{ fontSize: '1.3rem', marginBottom: 4 }}>💰</div>
-                    <div className="text-sm font-semibold">收入池 (池塘A)</div>
-                    <div className="text-xs text-muted">個人資金，完成後扣除</div>
+            
+            {showEditOptions ? (
+              /* 編輯循環支出選項詢問 */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+                <p className="text-secondary">
+                  這是一筆循環支出。請問您希望如何儲存此修改？
+                </p>
+                <div className="flex flex-col gap-3" style={{ marginTop: 'var(--space-2)' }}>
+                  <button className="btn btn-success w-full" onClick={() => handleSave('single')} disabled={saving}>
+                    僅修改此單筆項目
                   </button>
-                  <button id="expense-source-lake" onClick={() => setForm(f => ({ ...f, source: 'lake' }))} style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: `2px solid ${form.source === 'lake' ? 'var(--lake-safe)' : 'var(--color-border)'}`, background: form.source === 'lake' ? 'rgba(26,111,181,0.1)' : 'transparent', cursor: 'pointer', color: 'var(--text-primary)', textAlign: 'center' }}>
-                    <div style={{ fontSize: '1.3rem', marginBottom: 4 }}>🌊</div>
-                    <div className="text-sm font-semibold">湖泊資金</div>
-                    <div className="text-xs text-muted">需管理員批准</div>
+                  <button className="btn btn-primary w-full" onClick={() => handleSave('future')} disabled={saving}>
+                    修改此項目及未來所有關聯項目
+                  </button>
+                  <button className="btn btn-ghost w-full" onClick={() => setShowEditOptions(false)}>
+                    返回編輯
                   </button>
                 </div>
               </div>
-              {form.source === 'lake' && (
+            ) : (
+              /* 支出表單內容 */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+                {canManageLake && (
+                  <div className="form-group">
+                    <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                      所屬成員
+                      <LabelTooltip text="選擇此支出屬於哪位家庭成員（管理員專用）" />
+                    </label>
+                    <select id="expense-form-user" className="form-input form-select" value={form.user_id} onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))}>
+                      {members.map(m => <option key={m.id} value={m.id}>{m.display_name}</option>)}
+                    </select>
+                  </div>
+                )}
+                
                 <div className="form-group">
                   <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
-                    申請原因
-                    <LabelTooltip text="說明為何需要從家庭公共資金（湖泊）支付此費用" />
+                    支出名稱
+                    <LabelTooltip text="描述這筆支出的用途，例如：餐費、交通費、房租" />
                   </label>
-                  <input id="expense-form-reason" type="text" className="form-input" placeholder="說明為何需要使用湖泊資金" value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} />
+                  <input id="expense-form-name" type="text" className="form-input" placeholder="例：餐費、交通費" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
                 </div>
-              )}
-              {form.source === 'lake' && (
-                <div className="alert alert-info">
-                  <span>ℹ️</span>
-                  <span>選擇湖泊資金將自動建立調撥申請，需等待管理員批准後才會從湖泊扣除。</span>
+                
+                <div className="form-group">
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                    預計日期
+                    <LabelTooltip text="這筆支出預計發生的日期" />
+                  </label>
+                  <input id="expense-form-date" type="date" className="form-input" value={form.expected_date} onChange={e => setForm(f => ({ ...f, expected_date: e.target.value }))} />
                 </div>
-              )}
-              <div className="flex gap-3" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
-                <button className="btn btn-ghost" onClick={closeModal} id="expense-modal-cancel">取消</button>
-                <button className="btn btn-primary" onClick={handleSave} disabled={saving || !form.name || !form.amount} id="expense-modal-save">
-                  {saving ? '儲存中...' : '儲存'}
-                </button>
+                
+                <div className="form-group">
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                    金額（台幣）
+                    <LabelTooltip text="支出金額，請輸入整數（元）" />
+                  </label>
+                  <input id="expense-form-amount" type="number" className="form-input" placeholder="0" min="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                    資金來源
+                    <LabelTooltip text="選擇資金來源：收入池（個人）或湖泊（家庭共用，需管理員批准）" />
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
+                    <button id="expense-source-pond" onClick={() => setForm(f => ({ ...f, source: 'pond_a' }))} style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: `2px solid ${form.source === 'pond_a' ? 'var(--pond-a)' : 'var(--color-border)'}`, background: form.source === 'pond_a' ? 'rgba(26,158,92,0.1)' : 'transparent', cursor: 'pointer', color: 'var(--text-primary)', textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.3rem', marginBottom: 4 }}>💰</div>
+                      <div className="text-sm font-semibold">收入池 (池塘A)</div>
+                      <div className="text-xs text-muted">個人資金，完成後扣除</div>
+                    </button>
+                    <button id="expense-source-lake" onClick={() => setForm(f => ({ ...f, source: 'lake' }))} style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: `2px solid ${form.source === 'lake' ? 'var(--lake-safe)' : 'var(--color-border)'}`, background: form.source === 'lake' ? 'rgba(26,111,181,0.1)' : 'transparent', cursor: 'pointer', color: 'var(--text-primary)', textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.3rem', marginBottom: 4 }}>🌊</div>
+                      <div className="text-sm font-semibold">湖泊資金</div>
+                      <div className="text-xs text-muted">需管理員批准</div>
+                    </button>
+                  </div>
+                </div>
+                
+                {form.source === 'lake' && (
+                  <div className="form-group">
+                    <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                      申請原因
+                      <LabelTooltip text="說明為何需要從家庭公共資金（湖泊）支付此費用" />
+                    </label>
+                    <input id="expense-form-reason" type="text" className="form-input" placeholder="說明為何需要使用湖泊資金" value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} />
+                  </div>
+                )}
+                
+                {form.source === 'lake' && (
+                  <div className="alert alert-info">
+                    <span>ℹ️</span>
+                    <span>選擇湖泊資金將自動建立調撥申請，需等待管理員批准後才會從湖泊扣除。</span>
+                  </div>
+                )}
+
+                {/* 循環支出開關 (僅在新增模式下顯示) */}
+                {modal === 'add' && (
+                  <>
+                    <div className="form-group flex items-center" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
+                      <input
+                        id="expense-form-recurring"
+                        type="checkbox"
+                        checked={form.is_recurring}
+                        onChange={e => setForm(f => ({ ...f, is_recurring: e.target.checked }))}
+                        style={{ width: 18, height: 18, cursor: 'pointer' }}
+                      />
+                      <label htmlFor="expense-form-recurring" className="form-label font-semibold" style={{ margin: 0, cursor: 'pointer', userSelect: 'none' }}>
+                        🔄 設定為循環定期支出
+                      </label>
+                    </div>
+
+                    {form.is_recurring && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', padding: '12px', background: 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div className="form-group">
+                          <label className="form-label">循環週期</label>
+                          <select
+                            id="expense-form-recurrence-rule"
+                            className="form-input form-select"
+                            value={form.recurrence_rule}
+                            onChange={e => setForm(f => ({ ...f, recurrence_rule: e.target.value as any }))}
+                          >
+                            <option value="monthly">每月</option>
+                            <option value="quarterly">每季</option>
+                            <option value="yearly">每年</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">結束日期</label>
+                          <input
+                            id="expense-form-recurrence-end"
+                            type="date"
+                            className="form-input"
+                            value={form.recurrence_end_date}
+                            onChange={e => setForm(f => ({ ...f, recurrence_end_date: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                <div className="flex gap-3" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
+                  <button className="btn btn-ghost" onClick={closeModal} id="expense-modal-cancel">取消</button>
+                  <button className="btn btn-primary" onClick={() => handleSave()} disabled={saving || !form.name || !form.amount} id="expense-modal-save">
+                    {saving ? '儲存中...' : '儲存'}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -351,17 +588,34 @@ export default function ExpensesPage() {
               <h3 className="modal-title">⚠️ 確認刪除</h3>
               <button className="btn btn-ghost btn-sm" onClick={() => setDeleteTarget(null)}>✕</button>
             </div>
-            <p className="text-secondary" style={{ marginBottom: 'var(--space-2)' }}>
-              確定要刪除這筆支出記錄嗎？此操作無法復原。
+            <p className="text-secondary" style={{ marginBottom: 'var(--space-3)' }}>
+              確定要刪除這筆支出記錄嗎？若已完成，支出池餘額將同步重算。
             </p>
-            <div style={{ padding: '10px 14px', background: 'rgba(224,82,82,0.08)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-6)', border: '1px solid rgba(224,82,82,0.2)' }}>
+            <div style={{ padding: '10px 14px', background: 'rgba(224,82,82,0.08)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-5)', border: '1px solid rgba(224,82,82,0.2)' }}>
               <span className="font-semibold">{deleteTarget.name}</span>
               <span className="text-secondary" style={{ marginLeft: 8 }}>— {formatTWD(deleteTarget.amount)}</span>
             </div>
-            <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
-              <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)} id="expense-delete-cancel">取消</button>
-              <button className="btn btn-danger" onClick={handleDelete} id="expense-delete-confirm">確認刪除</button>
-            </div>
+
+            {showDeleteOptions ? (
+              /* 刪除循環項目選項 */
+              <div className="flex flex-col gap-2 w-full">
+                <button className="btn btn-danger w-full" onClick={() => handleDelete('single')} id="expense-delete-single">
+                  僅刪除此單筆項目
+                </button>
+                <button className="btn btn-primary w-full" onClick={() => handleDelete('future')} id="expense-delete-future" style={{ backgroundColor: 'var(--status-error-dark, #bd2130)', borderColor: 'var(--status-error-dark, #bd2130)' }}>
+                  刪除此筆及未來所有關聯項目
+                </button>
+                <button className="btn btn-ghost w-full" onClick={() => setDeleteTarget(null)}>
+                  取消
+                </button>
+              </div>
+            ) : (
+              /* 一般刪除確認 */
+              <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
+                <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)} id="expense-delete-cancel">取消</button>
+                <button className="btn btn-danger" onClick={() => handleDelete('single')} id="expense-delete-confirm">確認刪除</button>
+              </div>
+            )}
           </div>
         </div>
       )}

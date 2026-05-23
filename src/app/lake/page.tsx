@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
-import { Lake, LakeExpense, LakeRequest, DryPrediction } from '@/types';
+import { Lake, LakeExpense, LakeRequest, DryPrediction, IncomeItem } from '@/types';
 import { formatTWD, calculateLakeDryDate } from '@/lib/predictions';
 import { format, parseISO } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
@@ -19,15 +19,18 @@ export default function LakePage() {
   const router = useRouter();
   const supabase = createClient();
 
-  const [lake, setLake]         = useState<Lake | null>(null);
-  const [expenses, setExpenses] = useState<LakeExpense[]>([]);
+  const [lake, setLake]             = useState<Lake | null>(null);
+  const [expenses, setExpenses]     = useState<LakeExpense[]>([]);
+  const [lakeRequests, setLakeRequests] = useState<LakeRequest[]>([]);
+  const [incomes, setIncomes]       = useState<IncomeItem[]>([]);
   const [prediction, setPrediction] = useState<DryPrediction | null>(null);
-  const [loading, setLoading]   = useState(true);
-  const [modal, setModal]       = useState<ModalMode>(null);
-  const [selected, setSelected] = useState<LakeExpense | null>(null);
-  const [saving, setSaving]     = useState(false);
+  const [predMode, setPredMode]     = useState<'current' | 'estimated'>('current');
+  const [loading, setLoading]       = useState(true);
+  const [modal, setModal]           = useState<ModalMode>(null);
+  const [selected, setSelected]     = useState<LakeExpense | null>(null);
+  const [saving, setSaving]         = useState(false);
   const [newBalance, setNewBalance] = useState('');
-  const [members, setMembers] = useState<Profile[]>([]);
+  const [members, setMembers]       = useState<Profile[]>([]);
 
   const [injectForm, setInjectForm] = useState({
     user_id: '',
@@ -42,30 +45,52 @@ export default function LakePage() {
     recurrence_rule: 'monthly' as 'monthly' | 'quarterly' | 'yearly',
   });
 
+  // 初始化預測模式
+  useEffect(() => {
+    const stored = localStorage.getItem('family-pool-pred-mode');
+    if (stored === 'current' || stored === 'estimated') {
+      setPredMode(stored);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     if (!profile?.family_id) return;
     setLoading(true);
-    const [lakeRes, expRes, reqRes, profRes] = await Promise.all([
+    const [lakeRes, expRes, reqRes, profRes, incRes] = await Promise.all([
       supabase.from('lake').select('*').eq('family_id', profile.family_id).single(),
       supabase.from('lake_expenses').select('*').eq('family_id', profile.family_id).order('expected_date'),
       supabase.from('lake_requests').select('*').eq('family_id', profile.family_id).eq('status', 'approved'),
       supabase.from('profiles').select('*').eq('family_id', profile.family_id),
+      supabase.from('income_items').select('*').eq('family_id', profile.family_id),
     ]);
     const lakeData = lakeRes.data as Lake | null;
     const expData   = (expRes.data ?? []) as LakeExpense[];
     const reqData   = (reqRes.data ?? []) as LakeRequest[];
+    const incData   = (incRes.data ?? []) as IncomeItem[];
 
     setLake(lakeData);
     setExpenses(expData);
+    setLakeRequests(reqData);
+    setIncomes(incData);
     setMembers((profRes.data ?? []) as Profile[]);
-    if (lakeData) {
-      const pred = calculateLakeDryDate(lakeData.current_balance, expData.filter(e => e.status === 'active'), reqData);
-      setPrediction(pred);
-      // 更新 dry_date 到資料庫
-      await supabase.from('lake').update({ dry_date: pred.dry_date ?? null }).eq('id', lakeData.id);
-    }
     setLoading(false);
   }, [profile?.family_id, supabase]);
+
+  // 動態監聽並計算乾涸預測
+  useEffect(() => {
+    if (lake) {
+      const pred = calculateLakeDryDate(
+        lake.current_balance,
+        expenses.filter(e => e.status === 'active'),
+        lakeRequests,
+        incomes,
+        predMode
+      );
+      setPrediction(pred);
+      // 非同步更新資料庫中儲存的乾涸日期
+      supabase.from('lake').update({ dry_date: pred.dry_date ?? null }).eq('id', lake.id).then();
+    }
+  }, [lake, expenses, lakeRequests, incomes, predMode, supabase]);
 
   useEffect(() => {
     if (profile && !canManageLake) router.replace('/dashboard');
@@ -193,6 +218,14 @@ export default function LakePage() {
     critical: 'var(--status-error)',
   }[prediction?.warning_level ?? 'safe'];
 
+  const pendingLakeIncome = incomes
+    .filter(i => i.destination === 'lake' && i.status === 'pending')
+    .reduce((sum, i) => sum + i.amount, 0);
+
+  const displayedLakeBalance = predMode === 'estimated'
+    ? (lake?.current_balance ?? 0) + pendingLakeIncome
+    : (lake?.current_balance ?? 0);
+
   const recurringLabel: Record<string, string> = { monthly: '每月', quarterly: '每季', yearly: '每年' };
   const statusLabel: Record<string, string>    = { active: '啟用', paused: '暫停', completed: '完成' };
 
@@ -219,16 +252,55 @@ export default function LakePage() {
           {/* Lake Status */}
           <div className="card" style={{ marginBottom: 'var(--space-8)', padding: 0, overflow: 'hidden' }}>
             <WaterWave
-              level={Math.min(100, Math.max(0, (lake.current_balance / Math.max(lake.current_balance * 1.5, 1)) * 100))}
+              level={Math.min(100, Math.max(0, (displayedLakeBalance / Math.max(displayedLakeBalance * 1.5, 1)) * 100))}
               variant="lake"
               height={200}
-              label="🌊 湖泊當前餘額"
-              amount={formatTWD(lake.current_balance)}
+              label={predMode === 'estimated' ? "🔮 預估湖泊水位" : "🌊 當前湖泊水位"}
+              amount={formatTWD(displayedLakeBalance)}
               warningLevel={prediction?.warning_level ?? 'safe'}
             />
             <div style={{ padding: 'var(--space-6)' }}>
+              {/* 餘額雙重顯示 */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-5)', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: 'var(--space-4)' }}>
+                <div>
+                  <span className="text-xs text-muted">當前餘額</span>
+                  <div className="text-lg font-bold" style={{ color: 'var(--lake-safe)', marginTop: 2 }}>
+                    {formatTWD(lake.current_balance)}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-xs text-muted">預估餘額 (含預計收入)</span>
+                  <div className="text-lg font-bold" style={{ color: 'var(--pond-a-light)', marginTop: 2 }}>
+                    {formatTWD(lake.current_balance + pendingLakeIncome)}
+                  </div>
+                </div>
+              </div>
+
               <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
+                  <div className="flex items-center gap-2" style={{ marginBottom: 'var(--space-2)' }}>
+                    <select
+                      value={predMode}
+                      onChange={(e) => {
+                        const val = e.target.value as 'current' | 'estimated';
+                        setPredMode(val);
+                        localStorage.setItem('family-pool-pred-mode', val);
+                      }}
+                      className="text-xs font-semibold"
+                      style={{
+                        background: 'rgba(255,255,255,0.08)',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '2px 8px',
+                        color: 'var(--text-primary)',
+                        outline: 'none',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <option value="current" style={{ backgroundColor: 'var(--card-bg)' }}>當前水位預測</option>
+                      <option value="estimated" style={{ backgroundColor: 'var(--card-bg)' }}>預估餘額預測</option>
+                    </select>
+                  </div>
                   {prediction?.dry_date ? (
                     <div>
                       <span className="text-secondary text-sm">🔴 預計乾涸：</span>
@@ -258,7 +330,9 @@ export default function LakePage() {
           {/* Prediction Timeline */}
           {prediction && prediction.scheduled_outflows.length > 0 && (
             <div className="card" style={{ marginBottom: 'var(--space-8)' }}>
-              <h2 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 'var(--space-5)' }}>📊 支出時間軸預測</h2>
+              <h2 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 'var(--space-5)' }}>
+                {predMode === 'estimated' ? '📊 家庭收支預測時間軸' : '📊 支出時間軸預測'}
+              </h2>
               <div style={{ overflowX: 'auto' }}>
                 <table>
                   <thead>
@@ -266,19 +340,24 @@ export default function LakePage() {
                       <th>日期</th>
                       <th>項目</th>
                       <th style={{ textAlign: 'right' }}>金額</th>
-                      <th style={{ textAlign: 'right' }}>累計支出</th>
+                      <th style={{ textAlign: 'right' }}>累計淨支出</th>
                       <th style={{ textAlign: 'right' }}>預估餘額</th>
                     </tr>
                   </thead>
                   <tbody>
                     {prediction.scheduled_outflows.slice(0, 12).map((o, i) => {
+                      const isInflow = (o as any).type === 'inflow';
                       const remaining = lake.current_balance - o.cumulative;
                       return (
                         <tr key={i}>
                           <td>{format(parseISO(o.date), 'yyyy/MM/dd')}</td>
                           <td>{o.name}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--status-error)' }}>-{formatTWD(o.amount)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>{formatTWD(o.cumulative)}</td>
+                          <td style={{ textAlign: 'right', color: isInflow ? 'var(--status-success)' : 'var(--status-error)', fontWeight: isInflow ? 600 : 500 }}>
+                            {isInflow ? '+' : '-'}{formatTWD(o.amount)}
+                          </td>
+                          <td style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
+                            {o.cumulative > 0 ? '' : '-'}{formatTWD(Math.abs(o.cumulative))}
+                          </td>
                           <td style={{ textAlign: 'right', color: remaining < 0 ? 'var(--status-error)' : remaining < lake.current_balance * 0.2 ? 'var(--status-warning)' : 'var(--status-success)', fontWeight: 600 }}>
                             {formatTWD(Math.max(0, remaining))}
                           </td>

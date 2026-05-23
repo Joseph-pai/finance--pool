@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
-import { PondA, PondB, IncomeItem, ExpenseItem, Transaction } from '@/types';
+import { PondA, PondB, IncomeItem, ExpenseItem, Transaction, Profile } from '@/types';
 import { formatTWD, calcWaterLevel } from '@/lib/predictions';
 import WaterWave from '@/components/animations/WaterWave';
 import { format, parseISO } from 'date-fns';
@@ -12,7 +12,7 @@ import { useRouter } from 'next/navigation';
 import { LabelTooltip } from '@/components/ui/Tooltip';
 
 export default function MyPondsPage() {
-  const { profile } = useAuth();
+  const { profile, isAdmin } = useAuth();
   const supabase = createClient();
   const router = useRouter();
 
@@ -20,13 +20,15 @@ export default function MyPondsPage() {
   const [pondB, setPondB]               = useState<PondB | null>(null);
   const [incomes, setIncomes]           = useState<IncomeItem[]>([]);
   const [expenses, setExpenses]         = useState<ExpenseItem[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactions, setTransactions] = useState<(Transaction & { profile?: Profile })[]>([]);
   const [loading, setLoading]           = useState(true);
   const [tab, setTab]                   = useState<'overview' | 'history'>('overview');
+  
   // 支出池注入 modal
   const [showInjectModal, setShowInjectModal] = useState(false);
   const [injectAmount, setInjectAmount] = useState('');
   const [injecting, setInjecting]       = useState(false);
+  
   // 湖泊注入 modal
   const [showLakeModal, setShowLakeModal]       = useState(false);
   const [injectLakeAmount, setInjectLakeAmount] = useState('');
@@ -38,24 +40,47 @@ export default function MyPondsPage() {
   const [refundAmount, setRefundAmount]         = useState('');
   const [refunding, setRefunding]               = useState(false);
 
+  // 成員與過濾交易 (Admin專用)
+  const [filterUser, setFilterUser] = useState<string>('all');
+  const [members, setMembers]       = useState<Profile[]>([]);
+  
+  // 編輯交易 (Admin專用)
+  const [editTxModal, setEditTxModal] = useState<Transaction | null>(null);
+  const [editTxForm, setEditTxForm]   = useState({ amount: '', transaction_date: '', note: '' });
+  const [saving, setSaving]           = useState(false);
+
   const load = useCallback(async () => {
     if (!profile?.id || !profile?.family_id) return;
     setLoading(true);
-    const [pARes, pBRes, incRes, expRes, txRes] = await Promise.all([
+
+    let txQuery = supabase.from('transactions').select('*, profile:profiles(*)');
+    if (isAdmin && filterUser !== 'self') {
+      if (filterUser === 'all') {
+        txQuery = txQuery.eq('family_id', profile.family_id);
+      } else {
+        txQuery = txQuery.eq('user_id', filterUser);
+      }
+    } else {
+      txQuery = txQuery.eq('user_id', profile.id);
+    }
+
+    const [pARes, pBRes, incRes, expRes, txRes, profRes] = await Promise.all([
       supabase.from('pond_a').select('*').eq('user_id', profile.id).single(),
       supabase.from('pond_b').select('*').eq('user_id', profile.id).single(),
       supabase.from('income_items').select('*').eq('user_id', profile.id).order('expected_date', { ascending: false }),
       supabase.from('expense_items').select('*').eq('user_id', profile.id).order('expected_date', { ascending: false }),
-      supabase.from('transactions').select('*').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(20),
+      txQuery.order('created_at', { ascending: false }).limit(50),
+      supabase.from('profiles').select('*').eq('family_id', profile.family_id),
     ]);
 
     setPondA(pARes.data as PondA | null);
     setPondB(pBRes.data as PondB | null);
     setIncomes((incRes.data ?? []) as IncomeItem[]);
     setExpenses((expRes.data ?? []) as ExpenseItem[]);
-    setTransactions((txRes.data ?? []) as Transaction[]);
+    setTransactions((txRes.data ?? []) as (Transaction & { profile?: Profile })[]);
+    setMembers((profRes.data ?? []) as Profile[]);
     setLoading(false);
-  }, [profile?.id, profile?.family_id, supabase]);
+  }, [profile?.id, profile?.family_id, filterUser, isAdmin, supabase]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -114,12 +139,13 @@ export default function MyPondsPage() {
   };
 
   const typeLabel: Record<string, { text: string; color: string }> = {
-    income:             { text: '收入',     color: 'var(--status-success)' },
-    expense:            { text: '支出',     color: 'var(--status-error)' },
-    transfer_to_lake:   { text: '注入湖泊', color: 'var(--text-accent)' },
-    transfer_to_pond_b: { text: '注入支出池', color: 'var(--pond-b)' },
+    income:             { text: '外部收入', color: 'var(--status-success)' },
+    expense:            { text: '個人支出', color: 'var(--status-error)' },
+    transfer_to_lake:   { text: '注水至湖泊', color: 'var(--text-accent)' },
+    transfer_to_pond_b: { text: '注水至支出池', color: 'var(--pond-b)' },
     lake_expense:       { text: '湖泊支出', color: 'var(--status-error)' },
-    lake_to_member:     { text: '湖泊撥入', color: 'var(--status-success)' },
+    lake_to_member:     { text: '湖泊撥款', color: 'var(--status-success)' },
+    transfer_from_pond_b: { text: '支出池退款', color: 'var(--status-success)' },
   };
 
   // ── 收入池注水至支出池 ─────────────────────────────────────────────
@@ -190,6 +216,54 @@ export default function MyPondsPage() {
     finally { setRefunding(false); }
   };
 
+  // ── 管理員編輯與刪除交易 ─────────────────────────────────────────────
+  const openEditTx = (tx: Transaction) => {
+    setEditTxModal(tx);
+    setEditTxForm({
+      amount: String(tx.amount),
+      transaction_date: tx.transaction_date,
+      note: tx.note ?? '',
+    });
+  };
+
+  const handleSaveEditTx = async () => {
+    if (!editTxModal) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .update({
+          amount: Number(editTxForm.amount),
+          transaction_date: editTxForm.transaction_date,
+          note: editTxForm.note,
+        })
+        .eq('id', editTxModal.id);
+
+      if (error) throw error;
+      setEditTxModal(null);
+      load();
+    } catch (err: any) {
+      alert('修改交易失敗：' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteTx = async (tx: Transaction) => {
+    if (confirm(`⚠️ 確定要刪除此筆交易嗎？\n\n項目：${tx.note || tx.type}\n金額：${formatTWD(tx.amount)}\n成員：${tx.profile?.display_name ?? '未知'}\n\n注意：刪除此交易會自動觸發系統跨池水位重新對齊，且此操作無法復原。`)) {
+      setSaving(true);
+      try {
+        const { error } = await supabase.from('transactions').delete().eq('id', tx.id);
+        if (error) throw error;
+        load();
+      } catch (err: any) {
+        alert('刪除交易失敗：' + err.message);
+      } finally {
+        setSaving(false);
+      }
+    }
+  };
+
   if (loading) {
     return (
       <div className="page-container">
@@ -230,7 +304,7 @@ export default function MyPondsPage() {
               <WaterWave level={aLevel} variant="pond-a" height={180} label="💰 收入池 (預估總量)" amount={formatTWD(incomeWaveAmount)} />
               <div style={{ padding: 'var(--space-5)' }}>
                 {/* 目前存量 */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)', padding: '6px 10px', background: 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyPondsPage: 'space-between', marginBottom: 'var(--space-3)', padding: '6px 10px', background: 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}>
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>💵 目前可用 (未分配)</span>
                   <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--status-success)' }}>{formatTWD(pondABalance)}</span>
                 </div>
@@ -264,6 +338,7 @@ export default function MyPondsPage() {
               </div>
             </div>
 
+            {/* ── Card 2: 支出池 (池塘B) ── */}
             <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(124,58,237,0.3)' }}>
               <WaterWave level={bLevel} variant="pond-b" height={180} label="💸 支出池 (計畫中支出)" amount={formatTWD(expenseWaveAmount)} />
               <div style={{ padding: 'var(--space-5)' }}>
@@ -319,7 +394,6 @@ export default function MyPondsPage() {
             </div>
 
             {/* ── Card 3: 調節後水量 ── */}
-            {/* 調節後水量 = 收入池餘額 + 待入帳收入 - 計畫中支出 */}
             <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(14,165,233,0.3)' }}>
               <WaterWave
                 level={adjustedLevel}
@@ -395,7 +469,30 @@ export default function MyPondsPage() {
 
       {tab === 'history' && (
         <div>
-          <h2 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 'var(--space-5)' }}>交易記錄（最近20筆）</h2>
+          <div className="flex items-center justify-between flex-wrap gap-4" style={{ marginBottom: 'var(--space-5)' }}>
+            <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>交易記錄（最近50筆）</h2>
+            
+            {/* 系統管理員專用成員過濾下拉選單 */}
+            {isAdmin && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted font-semibold">成員交易過濾:</span>
+                <select
+                  className="form-input form-select"
+                  style={{ width: 'auto', padding: '4px 8px', fontSize: '0.85rem' }}
+                  value={filterUser}
+                  onChange={e => setFilterUser(e.target.value)}
+                  id="ponds-tx-filter"
+                >
+                  <option value="all">🌐 所有成員交易</option>
+                  <option value="self">👤 僅看我的交易</option>
+                  {members.filter(m => m.id !== profile?.id).map(m => (
+                    <option key={m.id} value={m.id}>👤 {m.display_name} 的交易</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
           {transactions.length === 0 ? (
             <div className="empty-state">
               <span className="empty-state-icon">📊</span>
@@ -407,23 +504,39 @@ export default function MyPondsPage() {
                 <thead>
                   <tr>
                     <th>日期</th>
+                    {isAdmin && <th>成員</th>}
                     <th>類型</th>
                     <th>備註</th>
                     <th style={{ textAlign: 'right' }}>金額</th>
+                    {isAdmin && <th style={{ textAlign: 'center' }}>操作</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {transactions.map(tx => {
                     const tl   = typeLabel[tx.type] ?? { text: tx.type, color: 'var(--text-primary)' };
-                    const isIn = ['income', 'lake_to_member'].includes(tx.type);
+                    const isIn = ['income', 'lake_to_member', 'transfer_from_pond_b'].includes(tx.type);
+                    
                     return (
                       <tr key={tx.id}>
                         <td className="text-secondary">{format(parseISO(tx.transaction_date), 'MM/dd', { locale: zhTW })}</td>
+                        {isAdmin && (
+                          <td className="font-semibold text-secondary">
+                            {tx.profile?.display_name ?? '未知'}
+                          </td>
+                        )}
                         <td><span style={{ color: tl.color, fontWeight: 500, fontSize: '0.85rem' }}>{tl.text}</span></td>
                         <td className="text-secondary">{tx.note || '—'}</td>
                         <td style={{ textAlign: 'right', fontFamily: 'Inter', fontWeight: 600, color: isIn ? 'var(--status-success)' : 'var(--status-error)' }}>
                           {isIn ? '+' : '-'}{formatTWD(tx.amount)}
                         </td>
+                        {isAdmin && (
+                          <td style={{ textAlign: 'center' }}>
+                            <div className="flex gap-2 justify-center">
+                              <button className="btn btn-ghost btn-sm" onClick={() => openEditTx(tx)} id={`tx-edit-${tx.id}`}>編輯</button>
+                              <button className="btn btn-danger btn-sm" onClick={() => handleDeleteTx(tx)} id={`tx-delete-${tx.id}`}>刪除</button>
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -435,7 +548,6 @@ export default function MyPondsPage() {
       )}
 
       {/* 注水至支出池彈窗 */}
-      {/* 注入支出池 Modal */}
       {showInjectModal && (
         <div className="modal-overlay" onClick={() => setShowInjectModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
@@ -537,6 +649,43 @@ export default function MyPondsPage() {
               <button className="btn btn-primary" onClick={handleRefundPondB} disabled={refunding || !refundAmount || Number(refundAmount) <= 0 || Number(refundAmount) > pondBBalance}>
                 {refunding ? '處理中...' : '確認退回'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 編輯交易記錄 Modal (Admin Only) */}
+      {editTxModal && (
+        <div className="modal-overlay" onClick={() => setEditTxModal(null)}>
+          <div className="modal" style={{ maxWidth: 450 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">⚙️ 編輯交易紀錄 (管理員專用)</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setEditTxModal(null)} id="tx-edit-close">✕</button>
+            </div>
+            <div style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-3)', background: 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <p className="text-xs text-muted">交易類型與關聯</p>
+              <p className="text-sm"><span className="text-muted">類型：</span>{typeLabel[editTxModal.type]?.text || editTxModal.type}</p>
+              <p className="text-sm"><span className="text-muted">成員：</span>{editTxModal.profile?.display_name ?? '系統'}</p>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              <div className="form-group">
+                <label className="form-label">交易金額</label>
+                <input type="number" className="form-input" value={editTxForm.amount} onChange={e => setEditTxForm(f => ({ ...f, amount: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">交易日期</label>
+                <input type="date" className="form-input" value={editTxForm.transaction_date} onChange={e => setEditTxForm(f => ({ ...f, transaction_date: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">備註/摘要</label>
+                <input type="text" className="form-input" value={editTxForm.note} onChange={e => setEditTxForm(f => ({ ...f, note: e.target.value }))} />
+              </div>
+              <div className="flex gap-3" style={{ justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
+                <button className="btn btn-ghost" onClick={() => setEditTxModal(null)}>取消</button>
+                <button className="btn btn-primary" onClick={handleSaveEditTx} disabled={saving || !editTxForm.amount} id="tx-edit-save">
+                  {saving ? '儲存中...' : '✓ 儲存變更'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
