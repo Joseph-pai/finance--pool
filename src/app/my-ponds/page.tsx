@@ -304,7 +304,7 @@ export default function MyPondsPage() {
               <WaterWave level={aLevel} variant="pond-a" height={180} label="💰 收入池 (預估總量)" amount={formatTWD(incomeWaveAmount)} />
               <div style={{ padding: 'var(--space-5)' }}>
                 {/* 目前存量 */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyPondsPage: 'space-between', marginBottom: 'var(--space-3)', padding: '6px 10px', background: 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)', padding: '6px 10px', background: 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)' }}>
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>💵 目前可用 (未分配)</span>
                   <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--status-success)' }}>{formatTWD(pondABalance)}</span>
                 </div>
