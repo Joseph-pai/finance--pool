@@ -146,16 +146,11 @@ export default function DashboardPage() {
     return () => { supabase.removeChannel(channel); };
   }, [profile?.family_id, supabase, loadDashboard]);
 
-  const pendingLakeIncome = allIncomes
-    .filter(i => i.destination === 'lake' && i.status === 'pending')
-    .reduce((sum, i) => sum + i.amount, 0);
-
-  const displayedLakeBalance = predMode === 'estimated'
-    ? (lake?.current_balance ?? 0) + pendingLakeIncome
-    : (lake?.current_balance ?? 0);
+  const actualLakeBalance = lake?.current_balance ?? 0;
+  const displayedLakeBalance = actualLakeBalance;
 
   const warningLevel = prediction?.warning_level ?? 'safe';
-  const lakeLevel    = lake ? calcWaterLevel(displayedLakeBalance, maxBalance) : 0;
+  const lakeLevel    = calcWaterLevel(actualLakeBalance, maxBalance);
 
   const warningColors: Record<string, string> = {
     safe:     'var(--status-success)',
