@@ -232,8 +232,28 @@ export default function IncomePage() {
   };
 
   const handleTransferToLake = async (item: IncomeItem) => {
+    if (!profile) return;
+
+    if (item.status === 'pending' && item.destination !== 'lake') {
+      setSaving(true);
+      try {
+        const { error } = await supabase
+          .from('income_items')
+          .update({ destination: 'lake' })
+          .eq('id', item.id);
+        if (error) throw new Error(error.message);
+      } catch (err: any) {
+        alert('系統錯誤：' + err.message);
+        console.error('加入湖泊預計收入失敗：', err);
+      } finally {
+        setSaving(false);
+        load();
+      }
+      return;
+    }
+
     const amt = Number(transferAmount);
-    if (!amt || !profile) return;
+    if (!amt) return;
     const pondABalance = pondA?.current_balance ?? 0;
     if (amt > pondABalance) {
       alert(`注入金額（${formatTWD(amt)}）不能超過收入池餘額（${formatTWD(pondABalance)}）`);
@@ -484,6 +504,21 @@ export default function IncomePage() {
                               注入支出池
                             </button>
                           </div>
+                        )}
+                        {item.status === 'pending' && item.destination !== 'lake' && isMe && (
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => handleTransferToLake(item)}
+                            disabled={saving}
+                            id={`income-plan-to-lake-${item.id}`}
+                          >
+                            加入湖泊預計收入
+                          </button>
+                        )}
+                        {item.status === 'pending' && item.destination === 'lake' && isMe && (
+                          <span className="badge badge-success" style={{ whiteSpace: 'nowrap' }}>
+                            已加入湖泊預計收入
+                          </span>
                         )}
                         <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)} id={`income-edit-${item.id}`}>編輯</button>
                       </>
