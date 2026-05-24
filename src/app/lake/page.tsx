@@ -191,7 +191,7 @@ export default function LakePage() {
     if (!profile?.family_id || !lake) return;
     const amt = Number(injectForm.amount);
     if (!amt || !injectForm.user_id) return;
-    if (amt > lake.current_balance) {
+    if (amt > currentLakeBalance) {
       alert('注入金額不能超過湖泊餘額');
       return;
     }
@@ -256,9 +256,13 @@ export default function LakePage() {
     .filter(i => i.destination === 'lake' && i.status === 'pending')
     .reduce((sum, i) => sum + i.amount, 0);
 
-  const displayedLakeBalance = predMode === 'estimated'
-    ? computedLakeBalance + pendingLakeIncome
-    : computedLakeBalance;
+  const currentLakeBalance = computedLakeBalance;
+  const estimatedLakeBalance = computedLakeBalance + pendingLakeIncome;
+
+  const currentWaterLevel = Math.min(100, Math.max(0, (currentLakeBalance / Math.max(currentLakeBalance * 1.5, 1)) * 100));
+  const estimatedWaterLevel = Math.min(100, Math.max(0, (estimatedLakeBalance / Math.max(estimatedLakeBalance * 1.5, 1)) * 100));
+
+  const lakeStatusMessage = currentLakeBalance === 0 ? '💡 請先設定湖泊初始餘額' : '✅ 暫無乾涸風險';
 
   const recurringLabel: Record<string, string> = { monthly: '每月', quarterly: '每季', yearly: '每年' };
   const statusLabel: Record<string, string>    = { active: '啟用', paused: '暫停', completed: '完成' };
@@ -284,79 +288,92 @@ export default function LakePage() {
       ) : (
         <>
           {/* Lake Status */}
-          <div className="card" style={{ marginBottom: 'var(--space-8)', padding: 0, overflow: 'hidden' }}>
-            <WaterWave
-              level={Math.min(100, Math.max(0, (displayedLakeBalance / Math.max(displayedLakeBalance * 1.5, 1)) * 100))}
-              variant="lake"
-              height={200}
-              label={predMode === 'estimated' ? "🔮 預估湖泊水位" : "🌊 當前湖泊水位"}
-              amount={formatTWD(displayedLakeBalance)}
-              warningLevel={prediction?.warning_level ?? 'safe'}
-            />
-            <div style={{ padding: 'var(--space-6)' }}>
-              {/* 餘額雙重顯示 */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-5)', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: 'var(--space-4)' }}>
+          <div className="card" style={{ marginBottom: 'var(--space-8)', padding: 'var(--space-6)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
                 <div>
-                  <span className="text-xs text-muted">當前餘額</span>
-                  <div className="text-lg font-bold" style={{ color: 'var(--lake-safe)', marginTop: 2 }}>
-                    {formatTWD(lake.current_balance)}
+                  <span className="text-xs text-muted">🌊 當前水位</span>
+                  <div className="text-lg font-bold" style={{ color: 'var(--lake-safe)', marginTop: 4 }}>
+                    {formatTWD(currentLakeBalance)}
                   </div>
                 </div>
-                <div>
-                  <span className="text-xs text-muted">預估餘額 (含預計收入)</span>
-                  <div className="text-lg font-bold" style={{ color: 'var(--pond-a-light)', marginTop: 2 }}>
-                    {formatTWD(lake.current_balance + pendingLakeIncome)}
-                  </div>
-                </div>
+                <WaterWave
+                  level={currentWaterLevel}
+                  variant="lake"
+                  height={180}
+                  label="當前水位"
+                  amount={formatTWD(currentLakeBalance)}
+                  warningLevel={prediction?.warning_level ?? 'safe'}
+                />
               </div>
 
-              <div className="flex items-center justify-between flex-wrap gap-4">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
                 <div>
-                  <div className="flex items-center gap-2" style={{ marginBottom: 'var(--space-2)' }}>
-                    <select
-                      value={predMode}
-                      onChange={(e) => {
-                        const val = e.target.value as 'current' | 'estimated';
-                        setPredMode(val);
-                        localStorage.setItem('family-pool-pred-mode', val);
-                      }}
-                      className="text-xs font-semibold"
-                      style={{
-                        background: 'rgba(255,255,255,0.08)',
-                        border: '1px solid rgba(255,255,255,0.15)',
-                        borderRadius: 'var(--radius-md)',
-                        padding: '2px 8px',
-                        color: 'var(--text-primary)',
-                        outline: 'none',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <option value="current" style={{ backgroundColor: 'var(--card-bg)' }}>當前水位預測</option>
-                      <option value="estimated" style={{ backgroundColor: 'var(--card-bg)' }}>預估餘額預測</option>
-                    </select>
+                  <span className="text-xs text-muted">🔮 預估水位</span>
+                  <div className="text-lg font-bold" style={{ color: 'var(--pond-a-light)', marginTop: 4 }}>
+                    {formatTWD(estimatedLakeBalance)}
                   </div>
-                  {prediction?.dry_date ? (
-                    <div>
-                      <span className="text-secondary text-sm">🔴 預計乾涸：</span>
-                      <span className="font-bold" style={{ color: warningColor, marginLeft: 6 }}>
-                        {format(parseISO(prediction.dry_date), 'yyyy年M月d日', { locale: zhTW })}
-                        {prediction.days_remaining !== null && <span className="text-secondary font-normal" style={{ marginLeft: 8 }}>（{prediction.days_remaining} 天後）</span>}
-                      </span>
-                    </div>
-                  ) : (
-                    <span className="text-secondary text-sm">
-                      {lake.current_balance === 0 ? '💡 請先設定湖泊初始餘額' : '✅ 暫無乾涸風險'}
+                  <div className="text-xs text-secondary" style={{ marginTop: 4 }}>
+                    含已確認與尚未確認的預計收入
+                  </div>
+                </div>
+                <WaterWave
+                  level={estimatedWaterLevel}
+                  variant="lake"
+                  height={180}
+                  label="預估水位"
+                  amount={formatTWD(estimatedLakeBalance)}
+                  warningLevel={prediction?.warning_level ?? 'safe'}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between flex-wrap gap-4" style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 'var(--space-5)' }}>
+              <div>
+                <div className="flex items-center gap-2" style={{ marginBottom: 'var(--space-2)' }}>
+                  <select
+                    value={predMode}
+                    onChange={(e) => {
+                      const val = e.target.value as 'current' | 'estimated';
+                      setPredMode(val);
+                      localStorage.setItem('family-pool-pred-mode', val);
+                    }}
+                    className="text-xs font-semibold"
+                    style={{
+                      background: 'rgba(255,255,255,0.08)',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '2px 8px',
+                      color: 'var(--text-primary)',
+                      outline: 'none',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="current" style={{ backgroundColor: 'var(--card-bg)' }}>當前水位預測</option>
+                    <option value="estimated" style={{ backgroundColor: 'var(--card-bg)' }}>預估餘額預測</option>
+                  </select>
+                </div>
+                {prediction?.dry_date ? (
+                  <div>
+                    <span className="text-secondary text-sm">🔴 預計乾涸：</span>
+                    <span className="font-bold" style={{ color: warningColor, marginLeft: 6 }}>
+                      {format(parseISO(prediction.dry_date), 'yyyy年M月d日', { locale: zhTW })}
+                      {prediction.days_remaining !== null && <span className="text-secondary font-normal" style={{ marginLeft: 8 }}>（{prediction.days_remaining} 天後）</span>}
                     </span>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <button className="btn btn-primary" onClick={() => setModal('inject')} id="lake-inject-member-btn">
-                    調撥給成員
-                  </button>
-                  <button className="btn btn-ghost" onClick={() => { setNewBalance(String(lake.current_balance)); setModal('set-balance'); }} id="lake-set-balance-btn">
-                    調整餘額
-                  </button>
-                </div>
+                  </div>
+                ) : (
+                  <span className="text-secondary text-sm">
+                    {lakeStatusMessage}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button className="btn btn-primary" onClick={() => setModal('inject')} id="lake-inject-member-btn">
+                  調撥給成員
+                </button>
+                <button className="btn btn-ghost" onClick={() => { setNewBalance(String(currentLakeBalance)); setModal('set-balance'); }} id="lake-set-balance-btn">
+                  調整餘額
+                </button>
               </div>
             </div>
           </div>
@@ -381,7 +398,7 @@ export default function LakePage() {
                   <tbody>
                     {prediction.scheduled_outflows.slice(0, 12).map((o, i) => {
                       const isInflow = (o as any).type === 'inflow';
-                      const remaining = lake.current_balance - o.cumulative;
+                      const remaining = currentLakeBalance - o.cumulative;
                       return (
                         <tr key={i}>
                           <td>{format(parseISO(o.date), 'yyyy/MM/dd')}</td>
@@ -392,7 +409,7 @@ export default function LakePage() {
                           <td style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
                             {o.cumulative > 0 ? '' : '-'}{formatTWD(Math.abs(o.cumulative))}
                           </td>
-                          <td style={{ textAlign: 'right', color: remaining < 0 ? 'var(--status-error)' : remaining < lake.current_balance * 0.2 ? 'var(--status-warning)' : 'var(--status-success)', fontWeight: 600 }}>
+                          <td style={{ textAlign: 'right', color: remaining < 0 ? 'var(--status-error)' : remaining < currentLakeBalance * 0.2 ? 'var(--status-warning)' : 'var(--status-success)', fontWeight: 600 }}>
                             {formatTWD(Math.max(0, remaining))}
                           </td>
                         </tr>
@@ -578,10 +595,10 @@ export default function LakePage() {
             <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
               <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
                 調撥金額
-                <span className="text-xs text-muted" style={{ marginLeft: 8, fontWeight: 400 }}>（可用餘額：{formatTWD(lake?.current_balance ?? 0)}）</span>
-                <LabelTooltip text={`最多可調撥 ${formatTWD(lake?.current_balance ?? 0)}，不能超過湖泊現有餘額`} />
+                <span className="text-xs text-muted" style={{ marginLeft: 8, fontWeight: 400 }}>（可用餘額：{formatTWD(currentLakeBalance)}）</span>
+                <LabelTooltip text={`最多可調撥 ${formatTWD(currentLakeBalance)}，不能超過目前可用湖泊餘額`} />
               </label>
-              <input type="number" className="form-input" placeholder="0" min="1" max={lake?.current_balance} value={injectForm.amount} onChange={e => setInjectForm(f => ({ ...f, amount: e.target.value }))} />
+              <input type="number" className="form-input" placeholder="0" min="1" max={currentLakeBalance} value={injectForm.amount} onChange={e => setInjectForm(f => ({ ...f, amount: e.target.value }))} />
             </div>
             
             <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
