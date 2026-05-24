@@ -126,6 +126,9 @@ export default function LakePage() {
     const channel = supabase.channel('lake-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lake', filter: `family_id=eq.${profile.family_id}` }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: `family_id=eq.${profile.family_id}` }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'income_items', filter: `family_id=eq.${profile.family_id}` }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lake_expenses', filter: `family_id=eq.${profile.family_id}` }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lake_requests', filter: `family_id=eq.${profile.family_id}` }, load)
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
