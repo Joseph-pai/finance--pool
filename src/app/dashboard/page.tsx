@@ -146,6 +146,10 @@ export default function DashboardPage() {
     return () => { supabase.removeChannel(channel); };
   }, [profile?.family_id, supabase, loadDashboard]);
 
+  const pendingLakeIncome = allIncomes
+    .filter(i => i.destination === 'lake' && i.status === 'pending')
+    .reduce((sum, i) => sum + i.amount, 0);
+
   const actualLakeBalance = lake?.current_balance ?? 0;
   const displayedLakeBalance = actualLakeBalance;
 
