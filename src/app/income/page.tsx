@@ -169,27 +169,41 @@ export default function IncomePage() {
         return;
       }
 
+      const updatePayload: any = {
+        name: form.name,
+        amount: amountNum,
+        destination: form.destination,
+        user_id: targetUserId,
+      };
+
+      const singleUpdate = {
+        ...updatePayload,
+        expected_date: form.expected_date,
+      };
+
+      if (selected.status === 'confirmed') {
+        singleUpdate.actual_amount = amountNum;
+      }
+
       if (selected.is_recurring && editType === 'future') {
         await supabase
           .from('income_items')
-          .update({
-            name: form.name,
-            amount: amountNum,
-            destination: form.destination,
-            user_id: targetUserId,
-          })
+          .update(updatePayload)
           .eq('recurrence_group_id', selected.recurrence_group_id)
           .gte('expected_date', selected.expected_date);
+
+        if (selected.status === 'confirmed') {
+          await supabase
+            .from('income_items')
+            .update({ actual_amount: amountNum })
+            .eq('recurrence_group_id', selected.recurrence_group_id)
+            .gte('expected_date', selected.expected_date)
+            .eq('status', 'confirmed');
+        }
       } else {
         await supabase
           .from('income_items')
-          .update({
-            name: form.name,
-            expected_date: form.expected_date,
-            amount: amountNum,
-            destination: form.destination,
-            user_id: targetUserId,
-          })
+          .update(singleUpdate)
           .eq('id', selected.id);
       }
       setShowEditOptions(false);
