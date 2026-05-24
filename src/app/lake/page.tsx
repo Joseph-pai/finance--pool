@@ -97,6 +97,16 @@ export default function LakePage() {
     else load();
   }, [profile, router, load]);
 
+  useEffect(() => {
+    if (!profile?.family_id) return;
+    const channel = supabase.channel('lake-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lake', filter: `family_id=eq.${profile.family_id}` }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: `family_id=eq.${profile.family_id}` }, load)
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [profile?.family_id, supabase, load]);
+
   const openAdd = () => {
     setForm({ name: '', expected_date: format(new Date(), 'yyyy-MM-dd'), amount: '', is_recurring: false, recurrence_rule: 'monthly' });
     setSelected(null);

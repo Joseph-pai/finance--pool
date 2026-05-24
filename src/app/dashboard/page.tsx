@@ -141,6 +141,7 @@ export default function DashboardPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pond_b', filter: `family_id=eq.${profile.family_id}` }, loadDashboard)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'income_items', filter: `family_id=eq.${profile.family_id}` }, loadDashboard)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'expense_items', filter: `family_id=eq.${profile.family_id}` }, loadDashboard)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: `family_id=eq.${profile.family_id}` }, loadDashboard)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [profile?.family_id, supabase, loadDashboard]);
