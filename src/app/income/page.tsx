@@ -304,13 +304,21 @@ export default function IncomePage() {
     if (!deleteTarget) return;
 
     if (deleteTarget.is_recurring && deleteType === 'future') {
-      await supabase
+      const { error } = await supabase
         .from('income_items')
         .delete()
         .eq('recurrence_group_id', deleteTarget.recurrence_group_id)
         .gte('expected_date', deleteTarget.expected_date);
+      if (error) {
+        console.error('Failed to delete recurring income (future):', error);
+        alert('刪除失敗：' + error.message);
+      }
     } else {
-      await supabase.from('income_items').delete().eq('id', deleteTarget.id);
+      const { error } = await supabase.from('income_items').delete().eq('id', deleteTarget.id);
+      if (error) {
+        console.error('Failed to delete income:', error);
+        alert('刪除失敗：' + error.message);
+      }
     }
 
     setDeleteTarget(null);
@@ -542,7 +550,9 @@ export default function IncomePage() {
                 <div className="form-group">
                   <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
                     入帳目標
-                    <LabelTooltip text="選擇此收入是匯入個人池塘A，或是直接匯入家庭共同湖泊" />
+                    <LabelTooltip text={
+                      "選擇此收入是匯入個人池塘A，或是直接匯入家庭共同湖泊。注意：系統設計上若出現欠款，會顯示在支出池（Pond B）；Pond A 與 Lake 不會顯示負數。"
+                    } />
                   </label>
                   <select
                     id="income-form-destination"

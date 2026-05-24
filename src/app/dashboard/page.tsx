@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
 import WaterWave from '@/components/animations/WaterWave';
+import { LabelTooltip } from '@/components/ui/Tooltip';
 import { formatTWD, calcWaterLevel, calculateLakeDryDate } from '@/lib/predictions';
 import { Lake, PondA, PondB, Profile, LakeExpense, LakeRequest, DryPrediction, ExpenseItem, IncomeItem } from '@/types';
 import { format } from 'date-fns';
@@ -398,6 +399,7 @@ export default function DashboardPage() {
                       <span style={{ color: bRawBalance < 0 ? 'var(--status-error)' : bRawBalance > 0 ? 'var(--status-success)' : 'var(--text-muted)', opacity: 0.85 }}>
                         狀態: {bRawBalance < 0 ? '🔴 欠款中' : bRawBalance > 0 ? '🟢 預付餘額' : '⚪ 收支平衡'}
                       </span>
+                      <LabelTooltip text={"系統設計說明：Pond A（個人收入池）與 Lake（家庭湖泊）不會顯示負值；若出現欠款，會顯示在支出池（Pond B）的負數中。"} />
                     </div>
                   </div>
                 </div>

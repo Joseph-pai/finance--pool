@@ -353,7 +353,9 @@ export default function MyPondsPage() {
                     <span style={{ fontSize: '0.72rem', color: pondBBalance < 0 ? 'var(--status-error)' : pondBBalance > 0 ? 'var(--status-success)' : 'var(--text-muted)' }}>
                       {pondBBalance < 0 ? '🔴 欠款中' : pondBBalance > 0 ? '🟢 預付餘額' : '⚪ 收支平衡'}
                     </span>
-                    <LabelTooltip text="支出池現有餘額：負值代表有已完成但尚未滿額的支出缺口；正值代表已預先轉入但尚未花用的餘額。" />
+                    <LabelTooltip text={
+                      "系統設計說明：Pond A（個人收入池）與 Lake（家庭湖泊）不會顯示負值；若支出超過收入，欠款會顯示在支出池（Pond B）的負數中。支出池負值表示有尚未補足的支出缺口，需由個人或管理員處理。"
+                    } />
                   </div>
                   <span style={{ fontSize: '0.85rem', fontWeight: 600, color: pondBBalance < 0 ? 'var(--status-error)' : pondBBalance > 0 ? 'var(--status-success)' : 'var(--text-muted)' }}>
                     {pondBDisplayStr}
