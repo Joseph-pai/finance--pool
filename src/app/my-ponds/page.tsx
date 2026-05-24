@@ -31,6 +31,7 @@ export default function MyPondsPage() {
   
   // 湖泊注入 modal
   const [showLakeModal, setShowLakeModal]       = useState(false);
+  const [lakeInjectSource, setLakeInjectSource] = useState<'pond_a' | 'pending'>('pond_a');
   const [injectLakeAmount, setInjectLakeAmount] = useState('');
   const [injectingLake, setInjectingLake]       = useState(false);
 
@@ -97,6 +98,20 @@ export default function MyPondsPage() {
   const pendingIncomeTotal = incomes
     .filter(i => i.status === 'pending')
     .reduce((sum, i) => sum + i.amount, 0);
+
+  // 可匯入湖泊的待入帳收入（尚未指定湖泊的 pending 項目）
+  const pendingToLakeAmount = incomes
+    .filter(i => i.status === 'pending' && i.destination !== 'lake')
+    .reduce((sum, i) => sum + i.amount, 0);
+
+  useEffect(() => {
+    if (!showLakeModal) return;
+    if (lakeInjectSource === 'pending') {
+      setInjectLakeAmount(String(pendingToLakeAmount));
+    } else {
+      setInjectLakeAmount('');
+    }
+  }, [showLakeModal, lakeInjectSource, pendingToLakeAmount]);
 
   // 計畫中支出（planned + approved 狀態，尚未完成）
   const plannedExpenseTotal = expenses
@@ -174,22 +189,63 @@ export default function MyPondsPage() {
   const handleTransferToLake = async () => {
     const amt = Number(injectLakeAmount);
     if (!amt || !profile) return;
-    if (amt > pondABalance) { alert('注入金額不能超過收入池餘額'); return; }
-    setInjectingLake(true);
-    try {
-      const { error } = await supabase.from('transactions').insert({
-        family_id: profile.family_id, user_id: profile.id,
-        type: 'transfer_to_lake', amount: amt,
-        source: 'pond_a', destination: 'lake',
-        note: '收入池注入湖泊',
-        transaction_date: new Date().toISOString().split('T')[0],
-      });
-      if (error) {
-        throw new Error(error.message);
+
+    if (lakeInjectSource === 'pond_a') {
+      if (amt > pondABalance) { alert('注入金額不能超過收入池餘額'); return; }
+      setInjectingLake(true);
+      try {
+        const { error } = await supabase.from('transactions').insert({
+          family_id: profile.family_id, user_id: profile.id,
+          type: 'transfer_to_lake', amount: amt,
+          source: 'pond_a', destination: 'lake',
+          note: '收入池注入湖泊',
+          transaction_date: new Date().toISOString().split('T')[0],
+        });
+        if (error) {
+          throw new Error(error.message);
+        }
+      } catch (err: any) {
+        alert('注入湖泊失敗：' + (err.message || '發生未知錯誤'));
+        console.error('注入湖泊失敗：', err);
+        setInjectingLake(false);
+        return;
       }
-      setShowLakeModal(false); setInjectLakeAmount(''); load();
-    } catch (err: any) { alert('注入湖泊失敗：' + (err.message || '發生未知錯誤')); console.error('注入湖泊失敗：', err); }
-    finally { setInjectingLake(false); }
+    } else {
+      const pendingItems = incomes.filter(i => i.status === 'pending' && i.destination !== 'lake');
+      if (pendingItems.length === 0) {
+        alert('目前沒有可匯入湖泊的待入帳收入');
+        return;
+      }
+
+      const targetAmount = pendingItems.reduce((sum, i) => sum + i.amount, 0);
+      if (amt !== targetAmount) {
+        alert(`待入帳匯入湖泊時，金額需等於目前可匯入湖泊的待入帳總額：${formatTWD(targetAmount)}`);
+        return;
+      }
+
+      setInjectingLake(true);
+      try {
+        const { error } = await supabase
+          .from('income_items')
+          .update({ destination: 'lake' })
+          .in('id', pendingItems.map(i => i.id));
+
+        if (error) {
+          throw new Error(error.message);
+        }
+      } catch (err: any) {
+        alert('匯入湖泊預計收入失敗：' + (err.message || '發生未知錯誤'));
+        console.error('匯入湖泊預計收入失敗：', err);
+        setInjectingLake(false);
+        return;
+      }
+    }
+
+    setShowLakeModal(false);
+    setInjectLakeAmount('');
+    setLakeInjectSource('pond_a');
+    load();
+    setInjectingLake(false);
   };
 
   // ── 退回支出池資金 (Pond B) ─────────────────────────────────────────────
@@ -585,28 +641,68 @@ export default function MyPondsPage() {
       {/* 注入湖泊 Modal */}
       {showLakeModal && (
         <div className="modal-overlay" onClick={() => setShowLakeModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
             <div className="modal-header">
               <h3 className="modal-title">🌊 收入池 → 湖泊</h3>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowLakeModal(false)}>✕</button>
             </div>
             <div style={{ marginBottom: 'var(--space-5)' }}>
-              <p className="text-sm text-secondary">將收入池資金注入家庭湖泊，增加公共資金池。</p>
-              <div className="flex justify-between text-xs font-mono" style={{ marginTop: 12, padding: 8, background: 'rgba(0,0,0,0.2)', borderRadius: 4 }}>
-                <span>收入池可用：{formatTWD(pondABalance)}</span>
+              <p className="text-sm text-secondary">選擇要匯入湖泊的來源，再輸入要匯入的金額。</p>
+              <div style={{ marginTop: 12, padding: 10, background: 'rgba(0,0,0,0.2)', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="flex justify-between text-xs font-mono">
+                  <span>收入池可用：{formatTWD(pondABalance)}</span>
+                  <span>待入帳：{formatTWD(pendingToLakeAmount)}</span>
+                </div>
+                <div className="text-xs text-secondary">
+                  <span>目前可匯入湖泊的待入帳收入：{formatTWD(pendingToLakeAmount)}</span>
+                </div>
               </div>
+            </div>
+            <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
+              <label className="form-label">匯入來源</label>
+              <select
+                className="form-input form-select"
+                value={lakeInjectSource}
+                onChange={e => {
+                  setLakeInjectSource(e.target.value as 'pond_a' | 'pending');
+                  setInjectLakeAmount('');
+                }}
+              >
+                <option value="pond_a">💰 收入池可用</option>
+                <option value="pending">⏳ 待入帳</option>
+              </select>
             </div>
             <div className="form-group" style={{ marginBottom: 'var(--space-6)' }}>
               <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
                 注入金額
-                <span className="text-xs text-muted" style={{ marginLeft: 8, fontWeight: 400 }}>（最多 {formatTWD(pondABalance)}）</span>
-                <LabelTooltip text={`從個人收入池注入家庭公共湖泊，最多可注入 ${formatTWD(pondABalance)}。此操作不可撤銷，注入後由管理員統一調配。`} />
+                <span className="text-xs text-muted" style={{ marginLeft: 8, fontWeight: 400 }}>
+                  （最多 {formatTWD(lakeInjectSource === 'pond_a' ? pondABalance : pendingToLakeAmount)}）
+                </span>
+                <LabelTooltip text={lakeInjectSource === 'pond_a' ? `從個人收入池注入家庭公共湖泊，最多可注入 ${formatTWD(pondABalance)}。此操作不可撤銷，注入後由管理員統一調配。` : `將尚未確認的預計收入標記為匯入湖泊，湖泊預估水位會立即增加。選擇此來源後，會一次將目前可匯入湖泊的待入帳收入加入湖泊。`} />
               </label>
-              <input type="number" className="form-input" placeholder="0" max={pondABalance} value={injectLakeAmount} onChange={e => setInjectLakeAmount(e.target.value)} autoFocus />
+              <input
+                type="number"
+                className="form-input"
+                placeholder={lakeInjectSource === 'pond_a' ? '0' : String(pendingToLakeAmount)}
+                max={lakeInjectSource === 'pond_a' ? pondABalance : pendingToLakeAmount}
+                value={injectLakeAmount}
+                onChange={e => setInjectLakeAmount(e.target.value)}
+                disabled={lakeInjectSource === 'pending'}
+                autoFocus
+              />
             </div>
             <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => setShowLakeModal(false)}>取消</button>
-              <button className="btn btn-primary" onClick={handleTransferToLake} disabled={injectingLake || !injectLakeAmount || Number(injectLakeAmount) <= 0 || Number(injectLakeAmount) > pondABalance}>
+              <button
+                className="btn btn-primary"
+                onClick={handleTransferToLake}
+                disabled={
+                  injectingLake ||
+                  !injectLakeAmount ||
+                  Number(injectLakeAmount) <= 0 ||
+                  Number(injectLakeAmount) > (lakeInjectSource === 'pond_a' ? pondABalance : pendingToLakeAmount)
+                }
+              >
                 {injectingLake ? '處理中...' : '確認注入'}
               </button>
             </div>
