@@ -39,6 +39,11 @@ export default function NotificationsPage() {
     setNotifications(ns => ns.map(n => n.id === id ? { ...n, is_read: true } : n));
   };
 
+  const deleteNotification = async (id: string) => {
+    await supabase.from('notifications').delete().eq('id', id);
+    setNotifications(ns => ns.filter(n => n.id !== id));
+  };
+
   const typeIcon: Record<string, string> = {
     lake_request:     '📋',
     request_approved: '✅',
@@ -105,6 +110,32 @@ export default function NotificationsPage() {
                   <p className="text-xs text-muted" style={{ marginTop: 4 }}>
                     {format(parseISO(n.created_at), 'yyyy/MM/dd HH:mm', { locale: zhTW })}
                   </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!n.is_read && (
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        markRead(n.id);
+                      }}
+                      type="button"
+                      aria-label="標記已讀"
+                    >
+                      標記
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      deleteNotification(n.id);
+                    }}
+                    type="button"
+                    aria-label="刪除通知"
+                  >
+                    刪除
+                  </button>
                 </div>
               </div>
             </div>

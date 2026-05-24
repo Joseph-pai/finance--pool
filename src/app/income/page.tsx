@@ -245,6 +245,7 @@ export default function IncomePage() {
       const { error } = await supabase.from('transactions').insert({
         family_id: profile.family_id,
         user_id: item.user_id,
+        reference_id: item.id,
         type: 'transfer_to_lake',
         amount: amt,
         source: 'pond_a',
@@ -276,6 +277,7 @@ export default function IncomePage() {
       const { error } = await supabase.from('transactions').insert({
         family_id: profile.family_id,
         user_id: item.user_id,
+        reference_id: item.id,
         type: 'transfer_to_pond_b',
         amount: amt,
         source: 'pond_a',
