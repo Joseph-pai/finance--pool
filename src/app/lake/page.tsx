@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
-import { Lake, LakeExpense, LakeRequest, DryPrediction, IncomeItem } from '@/types';
+import { Lake, LakeExpense, LakeRequest, DryPrediction, IncomeItem, Transaction } from '@/types';
 import { formatTWD, calculateLakeDryDate } from '@/lib/predictions';
 import { format, parseISO } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
@@ -23,6 +23,8 @@ export default function LakePage() {
   const [expenses, setExpenses]     = useState<LakeExpense[]>([]);
   const [lakeRequests, setLakeRequests] = useState<LakeRequest[]>([]);
   const [incomes, setIncomes]       = useState<IncomeItem[]>([]);
+  const [lakeTransactions, setLakeTransactions] = useState<Transaction[]>([]);
+  const [computedLakeBalance, setComputedLakeBalance] = useState(0);
   const [prediction, setPrediction] = useState<DryPrediction | null>(null);
   const [predMode, setPredMode]     = useState<'current' | 'estimated'>('current');
   const [loading, setLoading]       = useState(true);
@@ -56,23 +58,45 @@ export default function LakePage() {
   const load = useCallback(async () => {
     if (!profile?.family_id) return;
     setLoading(true);
-    const [lakeRes, expRes, reqRes, profRes, incRes] = await Promise.all([
+    const [lakeRes, expRes, reqRes, profRes, incRes, txRes] = await Promise.all([
       supabase.from('lake').select('*').eq('family_id', profile.family_id).single(),
       supabase.from('lake_expenses').select('*').eq('family_id', profile.family_id).order('expected_date'),
       supabase.from('lake_requests').select('*').eq('family_id', profile.family_id).eq('status', 'approved'),
       supabase.from('profiles').select('*').eq('family_id', profile.family_id),
       supabase.from('income_items').select('*').eq('family_id', profile.family_id),
+      supabase.from('transactions').select('*').eq('family_id', profile.family_id),
     ]);
     const lakeData = lakeRes.data as Lake | null;
     const expData   = (expRes.data ?? []) as LakeExpense[];
     const reqData   = (reqRes.data ?? []) as LakeRequest[];
     const incData   = (incRes.data ?? []) as IncomeItem[];
+    const txData    = (txRes.data ?? []) as Transaction[];
 
     setLake(lakeData);
     setExpenses(expData);
     setLakeRequests(reqData);
     setIncomes(incData);
+    setLakeTransactions(txData);
     setMembers((profRes.data ?? []) as Profile[]);
+
+    const computedLakeBalance = Math.max(0,
+      txData
+        .filter(t => t.type === 'transfer_to_lake')
+        .reduce((sum, t) => sum + t.amount, 0)
+      + txData
+        .filter(t => t.type === 'transfer_from_pond_b' && t.destination === 'lake')
+        .reduce((sum, t) => sum + t.amount, 0)
+      + incData
+        .filter(i => i.status === 'confirmed' && i.destination === 'lake')
+        .reduce((sum, i) => sum + (i.actual_amount ?? i.amount), 0)
+      - txData
+        .filter(t => t.type === 'lake_to_member')
+        .reduce((sum, t) => sum + t.amount, 0)
+      - txData
+        .filter(t => t.type === 'lake_expense')
+        .reduce((sum, t) => sum + t.amount, 0)
+    );
+    setComputedLakeBalance(computedLakeBalance);
     setLoading(false);
   }, [profile?.family_id, supabase]);
 
@@ -80,7 +104,7 @@ export default function LakePage() {
   useEffect(() => {
     if (lake) {
       const pred = calculateLakeDryDate(
-        lake.current_balance,
+        computedLakeBalance,
         expenses.filter(e => e.status === 'active'),
         lakeRequests,
         incomes,
@@ -90,7 +114,7 @@ export default function LakePage() {
       // 非同步更新資料庫中儲存的乾涸日期
       supabase.from('lake').update({ dry_date: pred.dry_date ?? null }).eq('id', lake.id).then();
     }
-  }, [lake, expenses, lakeRequests, incomes, predMode, supabase]);
+  }, [lake, computedLakeBalance, expenses, lakeRequests, incomes, predMode, supabase]);
 
   useEffect(() => {
     if (profile && !canManageLake) router.replace('/dashboard');
@@ -233,8 +257,8 @@ export default function LakePage() {
     .reduce((sum, i) => sum + i.amount, 0);
 
   const displayedLakeBalance = predMode === 'estimated'
-    ? (lake?.current_balance ?? 0) + pendingLakeIncome
-    : (lake?.current_balance ?? 0);
+    ? computedLakeBalance + pendingLakeIncome
+    : computedLakeBalance;
 
   const recurringLabel: Record<string, string> = { monthly: '每月', quarterly: '每季', yearly: '每年' };
   const statusLabel: Record<string, string>    = { active: '啟用', paused: '暫停', completed: '完成' };

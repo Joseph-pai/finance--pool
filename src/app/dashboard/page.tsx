@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase';
 import WaterWave from '@/components/animations/WaterWave';
 import { LabelTooltip } from '@/components/ui/Tooltip';
 import { formatTWD, calcWaterLevel, calculateLakeDryDate } from '@/lib/predictions';
-import { Lake, PondA, PondB, Profile, LakeExpense, LakeRequest, DryPrediction, ExpenseItem, IncomeItem } from '@/types';
+import { Lake, PondA, PondB, Profile, LakeExpense, LakeRequest, DryPrediction, ExpenseItem, IncomeItem, Transaction } from '@/types';
 import { format } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
 
@@ -33,6 +33,8 @@ export default function DashboardPage() {
   const [lakeExpenses, setLakeExpenses] = useState<LakeExpense[]>([]);
   const [lakeRequests, setLakeRequests] = useState<LakeRequest[]>([]);
   const [allIncomes, setAllIncomes]     = useState<IncomeItem[]>([]);
+  const [lakeTransactions, setLakeTransactions] = useState<Transaction[]>([]);
+  const [computedLakeBalance, setComputedLakeBalance] = useState(0);
   const [prediction, setPrediction]     = useState<DryPrediction | null>(null);
   const [predMode, setPredMode]         = useState<'current' | 'estimated'>('current');
   const [loading, setLoading]           = useState(true);
@@ -50,7 +52,7 @@ export default function DashboardPage() {
     if (!profile?.family_id) return;
     setLoading(true);
 
-    const [lakeRes, profilesRes, pondARes, pondBRes, lakeExpRes, requestsRes, expenseItemsRes, incomeItemsRes] = await Promise.all([
+    const [lakeRes, profilesRes, pondARes, pondBRes, lakeExpRes, requestsRes, expenseItemsRes, incomeItemsRes, transactionsRes] = await Promise.all([
       supabase.from('lake').select('*').eq('family_id', profile.family_id).single(),
       supabase.from('profiles').select('*').eq('family_id', profile.family_id),
       supabase.from('pond_a').select('*').eq('family_id', profile.family_id),
@@ -59,21 +61,44 @@ export default function DashboardPage() {
       supabase.from('lake_requests').select('*').eq('family_id', profile.family_id).eq('status', 'approved'),
       supabase.from('expense_items').select('*').eq('family_id', profile.family_id),
       supabase.from('income_items').select('*').eq('family_id', profile.family_id),
+      supabase.from('transactions').select('*').eq('family_id', profile.family_id),
     ]);
 
-    const lakeData      = lakeRes.data as Lake | null;
-    const profilesData  = (profilesRes.data ?? []) as Profile[];
-    const pondAData     = (pondARes.data ?? []) as PondA[];
-    const pondBData     = (pondBRes.data ?? []) as PondB[];
-    const expensesData  = (lakeExpRes.data ?? []) as LakeExpense[];
-    const requestsData  = (requestsRes.data ?? []) as LakeRequest[];
-    const allExpenses   = (expenseItemsRes.data ?? []) as ExpenseItem[];
-    const incomesData   = (incomeItemsRes.data ?? []) as IncomeItem[];
+    const lakeData         = lakeRes.data as Lake | null;
+    const profilesData     = (profilesRes.data ?? []) as Profile[];
+    const pondAData        = (pondARes.data ?? []) as PondA[];
+    const pondBData        = (pondBRes.data ?? []) as PondB[];
+    const expensesData     = (lakeExpRes.data ?? []) as LakeExpense[];
+    const requestsData     = (requestsRes.data ?? []) as LakeRequest[];
+    const allExpenses      = (expenseItemsRes.data ?? []) as ExpenseItem[];
+    const incomesData      = (incomeItemsRes.data ?? []) as IncomeItem[];
+    const transactionsData = (transactionsRes.data ?? []) as Transaction[];
 
     setLake(lakeData);
     setLakeExpenses(expensesData);
     setLakeRequests(requestsData);
     setAllIncomes(incomesData);
+    setLakeTransactions(transactionsData);
+
+    const computedLakeBalance = Math.max(0,
+      transactionsData
+        .filter(t => t.type === 'transfer_to_lake')
+        .reduce((sum, t) => sum + t.amount, 0)
+      + transactionsData
+        .filter(t => t.type === 'transfer_from_pond_b' && t.destination === 'lake')
+        .reduce((sum, t) => sum + t.amount, 0)
+      + incomesData
+        .filter(i => i.status === 'confirmed' && i.destination === 'lake')
+        .reduce((sum, i) => sum + (i.actual_amount ?? i.amount), 0)
+      - transactionsData
+        .filter(t => t.type === 'lake_to_member')
+        .reduce((sum, t) => sum + t.amount, 0)
+      - transactionsData
+        .filter(t => t.type === 'lake_expense')
+        .reduce((sum, t) => sum + t.amount, 0)
+    );
+
+    setComputedLakeBalance(computedLakeBalance);
 
     const memberList: MemberData[] = profilesData.map((p) => {
       const pIncomes  = incomesData.filter(i => i.user_id === p.id);
@@ -108,7 +133,7 @@ export default function DashboardPage() {
     // 計算最大參考水位：取所有池塘 A 的最大值和湖泊餘額的最大值
     const maxA = Math.max(0, ...memberList.map(m => (m.pond_a?.current_balance ?? 0) + m.pendingIncomeTotal));
     const maxB = Math.max(0, ...memberList.map(m => m.plannedExpenseTotal));
-    const mx = Math.max(lakeData?.current_balance ?? 0, maxA, maxB, 1);
+    const mx = Math.max(computedLakeBalance, maxA, maxB, 1);
     setMaxBalance(mx * 1.3);
 
     setLoading(false);
@@ -118,7 +143,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (lake) {
       const pred = calculateLakeDryDate(
-        lake.current_balance,
+        computedLakeBalance,
         lakeExpenses,
         lakeRequests,
         allIncomes,
@@ -126,7 +151,7 @@ export default function DashboardPage() {
       );
       setPrediction(pred);
     }
-  }, [lake, lakeExpenses, lakeRequests, allIncomes, predMode]);
+  }, [lake, computedLakeBalance, lakeExpenses, lakeRequests, allIncomes, predMode]);
 
   useEffect(() => {
     loadDashboard();
@@ -150,7 +175,7 @@ export default function DashboardPage() {
     .filter(i => i.destination === 'lake' && i.status === 'pending')
     .reduce((sum, i) => sum + i.amount, 0);
 
-  const actualLakeBalance = lake?.current_balance ?? 0;
+  const actualLakeBalance = computedLakeBalance;
   const displayedLakeBalance = actualLakeBalance;
 
   const warningLevel = prediction?.warning_level ?? 'safe';
