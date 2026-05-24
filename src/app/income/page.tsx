@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
-import { IncomeItem, Profile, PondA } from '@/types';
+import { IncomeItem, Profile, Transaction } from '@/types';
 import { formatTWD } from '@/lib/predictions';
 import { format, isAfter, parseISO } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
@@ -11,12 +11,34 @@ import { LabelTooltip } from '@/components/ui/Tooltip';
 
 type ModalMode = 'add' | 'edit' | 'confirm' | null;
 
+function calculateUserPondABalance(items: (IncomeItem & { profile?: Profile })[], transactions: Transaction[], userId: string): number {
+  const confirmedPondAIncome = items
+    .filter(item => item.user_id === userId && item.status === 'confirmed' && item.destination === 'pond_a')
+    .reduce((sum, item) => sum + (item.actual_amount ?? item.amount), 0);
+
+  const transferFromPondB = transactions
+    .filter(transaction => (transaction.user_id ?? '') === userId && transaction.destination === 'pond_a' && transaction.type === 'transfer_from_pond_b')
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+
+  const outboundTransfers = transactions
+    .filter(transaction => (transaction.user_id ?? '') === userId && transaction.source === 'pond_a' && ['transfer_to_lake', 'transfer_to_pond_b'].includes(transaction.type))
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+
+  return Math.max(0, confirmedPondAIncome + transferFromPondB - outboundTransfers);
+}
+
+function calculatePendingLakeAmount(items: (IncomeItem & { profile?: Profile })[], userId: string): number {
+  return items
+    .filter(item => item.user_id === userId && item.status === 'pending' && item.destination === 'lake')
+    .reduce((sum, item) => sum + item.amount, 0);
+}
+
 export default function IncomePage() {
   const { profile, isAdmin, canManageLake } = useAuth();
   const supabase = createClient();
 
   const [items, setItems]         = useState<(IncomeItem & { profile?: Profile })[]>([]);
-  const [pondA, setPondA]         = useState<PondA | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading]     = useState(true);
   const [modal, setModal]         = useState<ModalMode>(null);
   const [selected, setSelected]   = useState<IncomeItem | null>(null);
@@ -49,14 +71,14 @@ export default function IncomePage() {
   const load = useCallback(async () => {
     if (!profile?.family_id || !profile?.id) return;
     setLoading(true);
-    const [incRes, profRes, pondARes] = await Promise.all([
+    const [incRes, profRes, txRes] = await Promise.all([
       supabase.from('income_items').select('*, profile:profiles(*)').eq('family_id', profile.family_id).order('expected_date', { ascending: true }),
       supabase.from('profiles').select('*').eq('family_id', profile.family_id),
-      supabase.from('pond_a').select('*').eq('user_id', profile.id).single(),
+      supabase.from('transactions').select('*').eq('family_id', profile.family_id),
     ]);
     setItems((incRes.data ?? []) as (IncomeItem & { profile?: Profile })[]);
     setMembers((profRes.data ?? []) as Profile[]);
-    setPondA(pondARes.data as PondA | null);
+    setTransactions((txRes.data ?? []) as Transaction[]);
     setLoading(false);
   }, [profile?.family_id, profile?.id, supabase]);
 
@@ -254,9 +276,8 @@ export default function IncomePage() {
 
     const amt = Number(transferAmount);
     if (!amt) return;
-    const pondABalance = pondA?.current_balance ?? 0;
-    if (amt > pondABalance) {
-      alert(`注入金額（${formatTWD(amt)}）不能超過收入池餘額（${formatTWD(pondABalance)}）`);
+    if (amt > currentUserPondABalance) {
+      alert(`注入金額（${formatTWD(amt)}）不能超過收入池餘額（${formatTWD(currentUserPondABalance)}）`);
       return;
     }
     setSaving(true);
@@ -287,9 +308,8 @@ export default function IncomePage() {
   const handleTransferToPondBFromIncome = async (item: IncomeItem) => {
     const amt = Number(transferAmount);
     if (!amt || !profile) return;
-    const pondABalance = pondA?.current_balance ?? 0;
-    if (amt > pondABalance) {
-      alert(`注入金額（${formatTWD(amt)}）不能超過收入池餘額（${formatTWD(pondABalance)}）`);
+    if (amt > currentUserPondABalance) {
+      alert(`注入金額（${formatTWD(amt)}）不能超過收入池餘額（${formatTWD(currentUserPondABalance)}）`);
       return;
     }
     setSaving(true);
@@ -352,7 +372,8 @@ export default function IncomePage() {
   const myItems = items.filter(i => i.user_id === profile?.id);
   const totalPending = myItems.filter(i => i.status === 'pending').reduce((s, i) => s + i.amount, 0);
   const totalConfirmed = myItems.filter(i => i.status === 'confirmed').reduce((s, i) => s + (i.actual_amount ?? i.amount), 0);
-  const pondABalance = pondA?.current_balance ?? 0;
+  const currentUserPondABalance = profile ? calculateUserPondABalance(items, transactions, profile.id) : 0;
+  const currentUserPendingLakeAmount = profile ? calculatePendingLakeAmount(items, profile.id) : 0;
 
   const statusLabel: Record<string, { text: string; badge: string }> = {
     pending:   { text: '待確認', badge: 'badge-warning' },
@@ -381,8 +402,12 @@ export default function IncomePage() {
         </div>
         <div className="card card-sm" style={{ borderColor: 'rgba(26,111,181,0.4)', background: 'rgba(26,111,181,0.06)' }}>
           <p className="text-xs text-muted" style={{ marginBottom: 4 }}>池塘A 剩餘餘額</p>
-          <p className="amount-display amount-medium" style={{ color: 'var(--text-accent)' }}>{formatTWD(pondABalance)}</p>
+          <p className="amount-display amount-medium" style={{ color: 'var(--text-accent)' }}>{formatTWD(currentUserPondABalance)}</p>
           <p className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 2 }}>（已確認 - 已轉出）</p>
+        </div>
+        <div className="card card-sm">
+          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>待入湖泊預計收入</p>
+          <p className="amount-display amount-medium" style={{ color: 'var(--status-info)' }}>{formatTWD(currentUserPendingLakeAmount)}</p>
         </div>
         <div className="card card-sm">
           <p className="text-xs text-muted" style={{ marginBottom: 4 }}>收入筆數</p>
@@ -474,7 +499,7 @@ export default function IncomePage() {
                                 className="form-input"
                                 style={{ width: 90, padding: '4px 8px', fontSize: '0.85rem' }}
                                 placeholder="金額"
-                                title={`最多可轉出：${formatTWD(pondABalance)}`}
+                                title={`最多可轉出：${formatTWD(currentUserPondABalance)}`}
                                 value={activeItemId === item.id ? transferAmount : ''}
                                 onFocus={() => {
                                   setActiveItemId(item.id);
@@ -484,9 +509,14 @@ export default function IncomePage() {
                                 id={`income-transfer-input-${item.id}`}
                               />
                             </div>
-                            <span className="text-xs text-muted" style={{ fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
-                              可用 {formatTWD(pondABalance)}
-                            </span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
+                              <span className="text-xs text-muted" style={{ fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
+                                可用 {formatTWD(currentUserPondABalance)}
+                              </span>
+                              <span className="text-xs" style={{ color: 'var(--status-info)', fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
+                                待入湖泊 {formatTWD(currentUserPendingLakeAmount)}
+                              </span>
+                            </div>
                             <button
                               className="btn btn-primary btn-sm"
                               onClick={() => { setActiveItemId(item.id); handleTransferToLake(item); }}
