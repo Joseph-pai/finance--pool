@@ -14,9 +14,11 @@ export function calculateLakeDryDate(
   lakeExpenses: LakeExpense[],
   approvedRequests: LakeRequest[],
   incomeItems: IncomeItem[] = [],
-  mode: 'current' | 'estimated' = 'current'
+  mode: 'current' | 'estimated' = 'current',
+  /** 自訂起始日期（預設為今天），讓用戶可以試算不同起始日的安全到期日 */
+  fromDate?: Date
 ): DryPrediction {
-  const today = new Date();
+  const today = fromDate ?? new Date();
   today.setHours(0, 0, 0, 0);
 
   // 合併所有未來收支事件，按日期排序

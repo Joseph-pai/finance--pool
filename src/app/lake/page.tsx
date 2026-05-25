@@ -27,6 +27,7 @@ export default function LakePage() {
   const [computedLakeBalance, setComputedLakeBalance] = useState(0);
   const [prediction, setPrediction] = useState<DryPrediction | null>(null);
   const [predMode, setPredMode]     = useState<'current' | 'estimated'>('current');
+  const [predFromDate, setPredFromDate] = useState<string>('');
   const [loading, setLoading]       = useState(true);
   const [modal, setModal]           = useState<ModalMode>(null);
   const [selected, setSelected]     = useState<LakeExpense | null>(null);
@@ -137,19 +138,21 @@ export default function LakePage() {
 
   // 動態監聽並計算乾涸預測（起始餘額永遠使用當前餘額，避免雙重計算）
   useEffect(() => {
+    const fromDate = predFromDate ? parseISO(predFromDate) : undefined;
     const pred = calculateLakeDryDate(
       computedLakeBalance,
       expenses.filter(e => e.status === 'active'),
       lakeRequests,
       incomes,
-      predMode
+      predMode,
+      fromDate,
     );
     setPrediction(pred);
     // 非同步更新資料庫中儲存的乾涸日期
     if (lake) {
       supabase.from('lake').update({ dry_date: pred.dry_date ?? null }).eq('id', lake.id).then();
     }
-  }, [computedLakeBalance, expenses, lakeRequests, incomes, predMode, supabase, lake]);
+  }, [computedLakeBalance, expenses, lakeRequests, incomes, predMode, supabase, lake, predFromDate]);
 
 
   const openAdd = () => {
@@ -341,7 +344,7 @@ export default function LakePage() {
 
             <div className="flex items-center justify-between flex-wrap gap-4" style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 'var(--space-5)' }}>
               <div>
-                <div className="flex items-center gap-2" style={{ marginBottom: 'var(--space-2)' }}>
+                <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: 'var(--space-2)' }}>
                   <select
                     value={predMode}
                     onChange={(e) => {
@@ -363,6 +366,23 @@ export default function LakePage() {
                     <option value="current" style={{ backgroundColor: 'var(--card-bg)' }}>當前水位預測</option>
                     <option value="estimated" style={{ backgroundColor: 'var(--card-bg)' }}>預估餘額預測</option>
                   </select>
+                  <span className="text-xs text-muted" style={{ margin: '0 4px' }}>起始日</span>
+                  <input
+                    type="date"
+                    value={predFromDate}
+                    onChange={e => setPredFromDate(e.target.value)}
+                    className="form-input"
+                    style={{ width: 150, padding: '2px 8px', fontSize: '0.8rem', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 'var(--radius-md)', color: 'var(--text-primary)', outline: 'none' }}
+                    title="選擇預測起始日期（預設為今天）"
+                  />
+                  {predFromDate && (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setPredFromDate('')}
+                      style={{ padding: '2px 6px', fontSize: '0.7rem' }}
+                      title="重設回今天"
+                    >✕</button>
+                  )}
                 </div>
                 {prediction?.dry_date ? (
                   <div>
