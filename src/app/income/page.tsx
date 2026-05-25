@@ -12,9 +12,15 @@ import { LabelTooltip } from '@/components/ui/Tooltip';
 type ModalMode = 'add' | 'edit' | 'confirm' | null;
 
 function calculateUserPondABalance(items: (IncomeItem & { profile?: Profile })[], transactions: Transaction[], userId: string): number {
+  // 已確認的 Pond A 收入總額（含什一攤提及 honor_contribution 已扣款）
   const confirmedPondAIncome = items
     .filter(item => item.user_id === userId && item.status === 'confirmed' && item.destination === 'pond_a')
     .reduce((sum, item) => sum + (item.actual_amount ?? item.amount), 0);
+
+  // 扣除其中的什一奉獻（因為實際只入帳淨額）
+  const titheFromIncome = items
+    .filter(item => item.user_id === userId && item.status === 'confirmed' && item.destination === 'pond_a')
+    .reduce((sum, item) => sum + Math.round((item.actual_amount ?? item.amount) * 10) / 100, 0);
 
   const transferFromPondB = transactions
     .filter(transaction => (transaction.user_id ?? '') === userId && transaction.destination === 'pond_a' && transaction.type === 'transfer_from_pond_b')
@@ -24,7 +30,7 @@ function calculateUserPondABalance(items: (IncomeItem & { profile?: Profile })[]
     .filter(transaction => (transaction.user_id ?? '') === userId && transaction.source === 'pond_a' && ['transfer_to_lake', 'transfer_to_pond_b'].includes(transaction.type))
     .reduce((sum, transaction) => sum + transaction.amount, 0);
 
-  return Math.max(0, confirmedPondAIncome + transferFromPondB - outboundTransfers);
+  return Math.max(0, confirmedPondAIncome - titheFromIncome + transferFromPondB - outboundTransfers);
 }
 
 function calculatePendingLakeAmount(items: (IncomeItem & { profile?: Profile })[], userId: string): number {
@@ -152,16 +158,29 @@ export default function IncomePage() {
       const netAmount = actualAmount - titheAmount;
 
       if (selected.destination === 'pond_a') {
-        // 取得使用者 pond_a
+        // 取得或建立使用者 pond_a 記錄
         const { data: pa } = await supabase.from('pond_a').select('current_balance').eq('user_id', selected.user_id).maybeSingle();
         if (pa) {
           await supabase.from('pond_a').update({ current_balance: pa.current_balance + netAmount }).eq('user_id', selected.user_id);
+        } else {
+          await supabase.from('pond_a').insert({
+            user_id: selected.user_id,
+            family_id: profile.family_id,
+            current_balance: netAmount,
+            water_level: 0,
+          });
         }
       } else {
         // 目的地是 lake
         const { data: lake } = await supabase.from('lake').select('current_balance').eq('family_id', profile.family_id).maybeSingle();
         if (lake) {
           await supabase.from('lake').update({ current_balance: lake.current_balance + netAmount }).eq('family_id', profile.family_id);
+        } else {
+          await supabase.from('lake').insert({
+            family_id: profile.family_id,
+            current_balance: netAmount,
+            water_level: 0,
+          });
         }
       }
 
