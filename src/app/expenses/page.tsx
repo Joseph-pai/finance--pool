@@ -422,8 +422,8 @@ export default function ExpensesPage() {
 
       {/* Add/Edit Modal */}
       {modal && (
-        <div className="modal-overlay" onClick={closeModal}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={closeModal} style={{ overflowY: 'auto', padding: 'var(--space-4)', alignItems: 'flex-start' }}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxHeight: '90vh', overflowY: 'auto', marginTop: 40, marginBottom: 40 }}>
             <div className="modal-header">
               <h3 className="modal-title">{modal === 'add' ? '新增支出' : '編輯支出'}</h3>
               <button className="btn btn-ghost btn-sm" onClick={closeModal} id="expense-modal-close">✕</button>
