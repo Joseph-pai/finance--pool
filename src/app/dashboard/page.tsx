@@ -130,10 +130,22 @@ export default function DashboardPage() {
     });
     setMembers(memberList);
 
-    // 計算最大參考水位：取所有池塘 A 的最大值和湖泊餘額的最大值
+    // 計算預估湖泊餘額（使用函數內的區域變數）
+    const localPendingLakeIncome = incomesData
+      .filter(i => i.destination === 'lake' && i.status === 'pending')
+      .reduce((sum, i) => sum + i.amount, 0);
+    const localApprovedRequests = requestsData
+      .filter(r => r.status === 'approved')
+      .reduce((sum, r) => sum + (r.approved_amount ?? r.requested_amount), 0);
+    const localActiveExpenses = expensesData
+      .filter(e => e.status === 'active')
+      .reduce((sum, e) => sum + e.amount, 0);
+    const estimatedLake = computedLakeBalance + localPendingLakeIncome - localApprovedRequests - localActiveExpenses;
+
+    // 計算最大參考水位：取所有池塘 A 的最大值和湖泊餘額（含預估）的最大值
     const maxA = Math.max(0, ...memberList.map(m => (m.pond_a?.current_balance ?? 0) + m.pendingIncomeTotal));
     const maxB = Math.max(0, ...memberList.map(m => m.plannedExpenseTotal));
-    const mx = Math.max(computedLakeBalance, maxA, maxB, 1);
+    const mx = Math.max(computedLakeBalance, estimatedLake, maxA, maxB, 1);
     setMaxBalance(mx * 1.3);
 
     setLoading(false);
@@ -192,7 +204,8 @@ export default function DashboardPage() {
   const displayedLakeBalance = actualLakeBalance;
 
   const warningLevel = prediction?.warning_level ?? 'safe';
-  const lakeLevel    = calcWaterLevel(actualLakeBalance, maxBalance);
+  const lakeLevel         = calcWaterLevel(actualLakeBalance, maxBalance);
+  const estimatedLakeLevel = calcWaterLevel(estimatedLakeBalance, maxBalance);
 
   const warningColors: Record<string, string> = {
     safe:     'var(--status-success)',
@@ -246,7 +259,7 @@ export default function DashboardPage() {
             <div style={{ minWidth: 280, maxWidth: 380, flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'rgba(60,120,180,0.10)', borderRadius: 18, boxShadow: '0 2px 16px 0 rgba(0,0,0,0.08)', padding: '24px 16px 20px 16px' }}>
               <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--pond-a-light)', marginBottom: 8 }}>🌊 家庭湖泊（預估餘額）</div>
               <WaterWave
-                level={lakeLevel}
+                level={estimatedLakeLevel}
                 variant="lake"
                 height={200}
                 label="預估餘額"
