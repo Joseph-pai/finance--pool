@@ -177,14 +177,9 @@ export default function IncomePage() {
           note: `榮耀歸主奉獻（${selected.name}）`,
           transaction_date: new Date().toISOString().substring(0, 10),
         });
-
-        // 扣除 pond_a 的什一（trigger 已加全額，這裡手動扣回什一部分）
-        if (selected.destination === 'pond_a') {
-          const { data: pa } = await supabase.from('pond_a').select('current_balance').eq('user_id', selected.user_id).single();
-          if (pa) {
-            await supabase.from('pond_a').update({ current_balance: Math.max(0, pa.current_balance - titheAmount) }).eq('user_id', selected.user_id);
-          }
-        }
+        // 注意：不需要手動扣除 pond_a，
+        // transactions insert 後 DB trigger (fn_trigger_transaction_changed) 會自動呼叫
+        // fn_recalc_pond_a 來重新計算 pond_a 餘額（含 honor_contribution 扣除）。
       }
     } else {
       await supabase.from('income_items').update({ status: 'failed' }).eq('id', selected.id);
