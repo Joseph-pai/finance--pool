@@ -578,7 +578,8 @@ export default function RequestsPage() {
               </p>
               {batchAction === 'approve' && (
                 <div style={{ padding: '10px 14px', background: 'rgba(34,200,112,0.08)', borderRadius: 'var(--radius-sm)', fontSize: '0.85rem', color: 'var(--status-success)' }}>
-                  ℹ️ 批量批准將以申請金額（requested_amount）為準，到帳日設為今天。
+                  ℹ️ 批量批准將以申請金額（requested_amount）為準，到帳日設為各申請的所需日期（requested_date）。
+
                 </div>
               )}
               {batchAction === 'delete' && (
