@@ -161,12 +161,25 @@ export default function DashboardPage() {
     .filter(i => i.destination === 'lake' && i.status === 'pending')
     .reduce((sum, i) => sum + i.amount, 0);
 
+  // 已批准的湖泊調撥申請（尚未執行交易）
+  const approvedLakeRequests = lakeRequests
+    .filter(r => r.status === 'approved')
+    .reduce((sum, r) => sum + (r.approved_amount ?? r.requested_amount), 0);
+
+  // 啟用中的湖泊必要支出
+  const activeLakeExpensesTotal = lakeExpenses
+    .filter(e => e.status === 'active')
+    .reduce((sum, e) => sum + e.amount, 0);
+
+  // 預估餘額 = 當前餘額 + 待入帳收入 - 已批准申請 - 啟用中支出
+  const estimatedLakeBalance = computedLakeBalance + pendingLakeIncome - approvedLakeRequests - activeLakeExpensesTotal;
+
   // 動態監聽並計算乾涸預測
   useEffect(() => {
     if (lake) {
       // 預估模式下使用預估餘額作為起始金額
       const balanceForPrediction = predMode === 'estimated'
-        ? computedLakeBalance + pendingLakeIncome
+        ? estimatedLakeBalance
         : computedLakeBalance;
       const pred = calculateLakeDryDate(
         balanceForPrediction,
@@ -177,7 +190,7 @@ export default function DashboardPage() {
       );
       setPrediction(pred);
     }
-  }, [lake, computedLakeBalance, pendingLakeIncome, lakeExpenses, lakeRequests, allIncomes, predMode]);
+  }, [lake, computedLakeBalance, estimatedLakeBalance, lakeExpenses, lakeRequests, allIncomes, predMode]);
 
   const actualLakeBalance = computedLakeBalance;
   const displayedLakeBalance = actualLakeBalance;
@@ -241,11 +254,11 @@ export default function DashboardPage() {
                 variant="lake"
                 height={200}
                 label="預估餘額"
-                amount={formatTWD(actualLakeBalance + pendingLakeIncome)}
+                amount={formatTWD(estimatedLakeBalance)}
                 warningLevel={warningLevel}
               />
-              <div style={{ fontSize: 48, fontWeight: 900, color: 'var(--pond-a-light)', marginTop: 12, textAlign: 'center' }}>{formatTWD(actualLakeBalance + pendingLakeIncome)}</div>
-              <div className="text-xs text-secondary" style={{ marginTop: 6 }}>包含已確認與所有待入帳的預計收入</div>
+              <div style={{ fontSize: 48, fontWeight: 900, color: 'var(--pond-a-light)', marginTop: 12, textAlign: 'center' }}>{formatTWD(estimatedLakeBalance)}</div>
+              <div className="text-xs text-secondary" style={{ marginTop: 6 }}>含待入帳收入、已批准申請及啟用中支出</div>
             </div>
 
             {/* 當前餘額湖泊（右） */}

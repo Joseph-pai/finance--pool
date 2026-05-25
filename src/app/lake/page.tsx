@@ -122,12 +122,25 @@ export default function LakePage() {
     .filter(i => i.destination === 'lake' && i.status === 'pending')
     .reduce((sum, i) => sum + i.amount, 0);
 
+  // 已批准的湖泊調撥申請（尚未執行交易）
+  const approvedLakeRequests = lakeRequests
+    .filter(r => r.status === 'approved')
+    .reduce((sum, r) => sum + (r.approved_amount ?? r.requested_amount), 0);
+
+  // 啟用中的湖泊必要支出
+  const activeLakeExpensesTotal = expenses
+    .filter(e => e.status === 'active')
+    .reduce((sum, e) => sum + e.amount, 0);
+
+  // 預估餘額 = 當前餘額 + 待入帳收入 - 已批准申請 - 啟用中支出
+  const estimatedLakeBalance = computedLakeBalance + pendingLakeIncome - approvedLakeRequests - activeLakeExpensesTotal;
+
   // 動態監聽並計算乾涸預測
   useEffect(() => {
     if (lake) {
       // 預估模式下使用預估餘額作為起始金額
       const balanceForPrediction = predMode === 'estimated'
-        ? computedLakeBalance + pendingLakeIncome
+        ? estimatedLakeBalance
         : computedLakeBalance;
       const pred = calculateLakeDryDate(
         balanceForPrediction,
@@ -140,7 +153,7 @@ export default function LakePage() {
       // 非同步更新資料庫中儲存的乾涸日期
       supabase.from('lake').update({ dry_date: pred.dry_date ?? null }).eq('id', lake.id).then();
     }
-  }, [lake, computedLakeBalance, pendingLakeIncome, expenses, lakeRequests, incomes, predMode, supabase]);
+  }, [lake, computedLakeBalance, estimatedLakeBalance, expenses, lakeRequests, incomes, predMode, supabase]);
 
   const openAdd = () => {
     setForm({ name: '', expected_date: format(new Date(), 'yyyy-MM-dd'), amount: '', is_recurring: false, recurrence_rule: 'monthly' });
@@ -264,7 +277,6 @@ export default function LakePage() {
   }[prediction?.warning_level ?? 'safe'];
 
   const currentLakeBalance = computedLakeBalance;
-  const estimatedLakeBalance = computedLakeBalance + pendingLakeIncome;
 
   const currentWaterLevel = Math.min(100, Math.max(0, (currentLakeBalance / Math.max(currentLakeBalance * 1.5, 1)) * 100));
   const estimatedWaterLevel = Math.min(100, Math.max(0, (estimatedLakeBalance / Math.max(estimatedLakeBalance * 1.5, 1)) * 100));
