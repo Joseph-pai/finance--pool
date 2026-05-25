@@ -86,6 +86,7 @@ export function calculateLakeDryDate(
   let remaining = currentBalance;
   const scheduled: (DryPrediction['scheduled_outflows'][0] & { type?: 'inflow' | 'outflow' })[] = [];
   let dryDate: string | null = null;
+  let deficitAtDryDate = 0; // 在乾涸日當天記錄短缺金額
 
   for (const event of futureEvents) {
     if (event.type === 'inflow') {
@@ -104,21 +105,21 @@ export function calculateLakeDryDate(
 
     if (remaining <= 0 && !dryDate) {
       dryDate = event.date;
+      deficitAtDryDate = Math.abs(remaining); // 記錄乾涸當下的短缺金額
     }
   }
 
   if (dryDate) {
     const daysRemaining = differenceInDays(parseISO(dryDate), today);
-    // 計算到期時資金短缺金額（remaining 為負值代表短缺）
-    const deficitAmount = remaining < 0 ? Math.abs(remaining) : 0;
     return {
       dry_date: dryDate,
       days_remaining: daysRemaining,
       warning_level: getWarningLevel(daysRemaining),
       scheduled_outflows: scheduled,
-      deficit_amount: deficitAmount,
+      deficit_amount: deficitAtDryDate,
     };
   }
+
 
   // 沒有找到乾涸日期
   return {
