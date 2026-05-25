@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
-import { IncomeItem, Profile, Transaction } from '@/types';
+import { IncomeItem, Profile, Transaction, HonorLake } from '@/types';
 import { formatTWD } from '@/lib/predictions';
 import { format, isAfter, parseISO } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
@@ -39,6 +39,7 @@ export default function IncomePage() {
 
   const [items, setItems]         = useState<(IncomeItem & { profile?: Profile })[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [honorLake, setHonorLake] = useState<HonorLake | null>(null);
   const [loading, setLoading]     = useState(true);
   const [modal, setModal]         = useState<ModalMode>(null);
   const [selected, setSelected]   = useState<IncomeItem | null>(null);
@@ -71,14 +72,16 @@ export default function IncomePage() {
   const load = useCallback(async () => {
     if (!profile?.family_id || !profile?.id) return;
     setLoading(true);
-    const [incRes, profRes, txRes] = await Promise.all([
+    const [incRes, profRes, txRes, hlRes] = await Promise.all([
       supabase.from('income_items').select('*, profile:profiles(*)').eq('family_id', profile.family_id).order('expected_date', { ascending: true }),
       supabase.from('profiles').select('*').eq('family_id', profile.family_id),
       supabase.from('transactions').select('*').eq('family_id', profile.family_id),
+      supabase.from('honor_lake').select('*').eq('family_id', profile.family_id).maybeSingle(),
     ]);
     setItems((incRes.data ?? []) as (IncomeItem & { profile?: Profile })[]);
     setMembers((profRes.data ?? []) as Profile[]);
     setTransactions((txRes.data ?? []) as Transaction[]);
+    setHonorLake(hlRes.data as HonorLake | null);
     setLoading(false);
   }, [profile?.family_id, profile?.id, supabase]);
 
@@ -127,49 +130,64 @@ export default function IncomePage() {
     setSaving(false);
   };
 
-  /** 確保 family 有 honor_lake 記錄，若無則自動建立 */
-  const ensureHonorLake = useCallback(async () => {
-    if (!profile?.family_id) return;
-    const { data } = await supabase.from('honor_lake').select('id').eq('family_id', profile.family_id).maybeSingle();
-    if (!data) {
-      await supabase.from('honor_lake').insert({ family_id: profile.family_id, current_balance: 0 });
-    }
-  }, [profile?.family_id, supabase]);
+  /**
+   * 「確認到帳」時自動扣除 10% 作為榮耀歸主奉獻
+   * 無論該收入的目的地為何、預計到期日為何，均照扣
+   */
+  const handleConfirmIncome = async (confirmed: boolean) => {
+    if (!selected || !profile) return;
+    setSaving(true);
+    const actualAmount = Number(confirmActual);
+    const titheAmount = Math.round(actualAmount * 10) / 100; // 10%
 
-  /** 建立什一貢獻 transaction */
-  const createTitheTransaction = useCallback(async (
-    userId: string, incomeItemId: string, amount: number, titheAmount: number
-  ) => {
-    if (!profile?.family_id || titheAmount <= 0) return;
-    // 更新 honor_lake 餘額
-    const { data: hl } = await supabase.from('honor_lake').select('current_balance').eq('family_id', profile.family_id).single();
-    if (hl) {
-      await supabase.from('honor_lake').update({ current_balance: hl.current_balance + titheAmount }).eq('family_id', profile.family_id);
+    if (confirmed) {
+      // 1. 更新收入狀態為已確認
+      await supabase.from('income_items').update({
+        status: 'confirmed',
+        actual_amount: actualAmount,
+        confirmed_at: new Date().toISOString(),
+      }).eq('id', selected.id);
+
+      // 2. 自動扣 10% 到 honor_lake
+      if (titheAmount > 0) {
+        // 確保 honor_lake 存在
+        const { data: hl } = await supabase.from('honor_lake').select('current_balance').eq('family_id', profile.family_id).maybeSingle();
+        const { data: hl2 } = hl
+          ? { data: hl }
+          : await supabase.from('honor_lake').insert({ family_id: profile.family_id, current_balance: 0 }).select('current_balance').single();
+
+        if (hl2) {
+          await supabase.from('honor_lake').update({ current_balance: (hl2.current_balance ?? 0) + titheAmount }).eq('family_id', profile.family_id);
+        }
+
+        // 建立 transaction 記錄
+        await supabase.from('transactions').insert({
+          family_id: profile.family_id,
+          user_id: profile.id,
+          reference_id: selected.id,
+          type: 'honor_contribution',
+          amount: titheAmount,
+          source: 'pond_a',
+          destination: 'honor_lake',
+          note: `榮耀歸主奉獻（${selected.name}）`,
+          transaction_date: new Date().toISOString().substring(0, 10),
+        });
+      }
+    } else {
+      await supabase.from('income_items').update({ status: 'failed' }).eq('id', selected.id);
     }
-    // 建立 transaction
-    await supabase.from('transactions').insert({
-      family_id: profile.family_id,
-      user_id: userId,
-      reference_id: incomeItemId,
-      type: 'honor_contribution',
-      amount: titheAmount,
-      source: 'pond_a',
-      destination: 'honor_lake',
-      note: `什一奉獻（${form.name}）`,
-      transaction_date: new Date().toISOString().substring(0, 10),
-    });
-  }, [profile?.family_id, supabase, form.name]);
+
+    closeModal();
+    load();
+  };
 
   const handleSave = async (editType?: 'single' | 'future') => {
     if (!profile?.family_id) return;
     setSaving(true);
     const targetUserId = form.user_id || profile.id;
     const amountNum = Number(form.amount);
-    const titheAmount = Math.round(amountNum * 10) / 100; // 固定 10%
 
     if (modal === 'add') {
-      await ensureHonorLake();
-
       if (form.is_recurring) {
         const recurrence_group_id = crypto.randomUUID();
         const occurrences: any[] = [];
@@ -191,8 +209,6 @@ export default function IncomePage() {
             recurrence_end_date: form.recurrence_end_date,
             recurrence_group_id,
             status: 'pending',
-            tithe_percentage: 10,
-            tithe_amount: titheAmount,
           });
 
           if (form.recurrence_rule === 'monthly') {
@@ -206,16 +222,10 @@ export default function IncomePage() {
           }
         }
         if (occurrences.length > 0) {
-          const { data: inserted } = await supabase.from('income_items').insert(occurrences).select();
-          // 每筆循環收入立即扣什一
-          if (inserted) {
-            for (const item of inserted) {
-              await createTitheTransaction(targetUserId, item.id, amountNum, titheAmount);
-            }
-          }
+          await supabase.from('income_items').insert(occurrences);
         }
       } else {
-        const { data: inserted } = await supabase.from('income_items').insert({
+        await supabase.from('income_items').insert({
           name: form.name,
           expected_date: form.expected_date,
           amount: amountNum,
@@ -224,13 +234,7 @@ export default function IncomePage() {
           destination: form.destination,
           is_recurring: false,
           status: 'pending',
-          tithe_percentage: 10,
-          tithe_amount: titheAmount,
-        }).select();
-        // 立即扣什一
-        if (inserted && inserted.length > 0) {
-          await createTitheTransaction(targetUserId, inserted[0].id, amountNum, titheAmount);
-        }
+        });
       }
       closeModal();
       load();
@@ -282,25 +286,6 @@ export default function IncomePage() {
       closeModal();
       load();
     }
-  };
-
-  const handleConfirmIncome = async (confirmed: boolean) => {
-    if (!selected || !profile) return;
-    setSaving(true);
-    const actualAmount = Number(confirmActual);
-
-    if (confirmed) {
-      await supabase.from('income_items').update({
-        status: 'confirmed',
-        actual_amount: actualAmount,
-        confirmed_at: new Date().toISOString(),
-      }).eq('id', selected.id);
-    } else {
-      await supabase.from('income_items').update({ status: 'failed' }).eq('id', selected.id);
-    }
-
-    closeModal();
-    load();
   };
 
   const handleTransferToLake = async (item: IncomeItem) => {
@@ -424,7 +409,6 @@ export default function IncomePage() {
   const totalConfirmed = myItems.filter(i => i.status === 'confirmed').reduce((s, i) => s + (i.actual_amount ?? i.amount), 0);
   const currentUserPondABalance = profile ? calculateUserPondABalance(items, transactions, profile.id) : 0;
   const currentUserPendingLakeAmount = profile ? calculatePendingLakeAmount(items, profile.id) : 0;
-  const totalTithe = myItems.reduce((s, i) => s + (i.tithe_amount ?? 0), 0);
 
 
   const statusLabel: Record<string, { text: string; badge: string }> = {
@@ -462,8 +446,8 @@ export default function IncomePage() {
           <p className="amount-display amount-medium" style={{ color: 'var(--status-info)' }}>{formatTWD(currentUserPendingLakeAmount)}</p>
         </div>
         <div className="card card-sm" style={{ borderColor: 'rgba(245,166,35,0.3)' }}>
-          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>🌟 什一奉獻累計</p>
-          <p className="amount-display amount-medium" style={{ color: 'var(--status-warning)' }}>{formatTWD(totalTithe)}</p>
+          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>🌟 可奉獻金額</p>
+          <p className="amount-display amount-medium" style={{ color: 'var(--status-warning)' }}>{formatTWD(honorLake?.current_balance ?? 0)}</p>
         </div>
         <div className="card card-sm">
           <p className="text-xs text-muted" style={{ marginBottom: 4 }}>收入筆數</p>
@@ -763,7 +747,7 @@ export default function IncomePage() {
         </div>
       )}
 
-      {/* Confirm Modal */}
+      {/* Confirm Modal — 確認到帳時顯示自動提撥 10% 資訊 */}
       {modal === 'confirm' && selected && (
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -781,6 +765,13 @@ export default function IncomePage() {
               </label>
               <input id="income-confirm-amount" type="number" className="form-input" value={confirmActual} onChange={e => setConfirmActual(e.target.value)} />
             </div>
+            {Number(confirmActual) > 0 && (
+              <div style={{ padding: '10px 14px', background: 'rgba(245,166,35,0.1)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-5)', border: '1px solid rgba(245,166,35,0.2)', textAlign: 'center' }}>
+                <span className="text-xs" style={{ color: 'var(--status-warning)' }}>
+                  🌟 將自動提撥 10%（{formatTWD(Math.round(Number(confirmActual) * 10) / 100)}）至「榮耀歸於主」
+                </span>
+              </div>
+            )}
             <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
               <button className="btn btn-danger" onClick={() => handleConfirmIncome(false)} disabled={saving} id="income-confirm-no">
                 未到帳

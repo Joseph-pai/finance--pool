@@ -122,7 +122,6 @@ export default function HonorLakePage() {
     );
   }
 
-  const totalContributions = contributions.reduce((sum, t) => sum + t.amount, 0);
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
 
   return (
@@ -135,12 +134,8 @@ export default function HonorLakePage() {
       {/* Summary Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-8)' }}>
         <div className="card card-sm" style={{ borderColor: 'rgba(245,166,35,0.3)' }}>
-          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>🌟 目前奉獻餘額</p>
+          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>🌟 可奉獻金額</p>
           <p className="amount-display amount-medium" style={{ color: 'var(--status-warning)' }}>{formatTWD(honorLake?.current_balance ?? 0)}</p>
-        </div>
-        <div className="card card-sm" style={{ borderColor: 'rgba(26,158,92,0.3)' }}>
-          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>累計什一奉獻</p>
-          <p className="amount-display amount-medium" style={{ color: 'var(--status-success)' }}>{formatTWD(totalContributions)}</p>
         </div>
         <div className="card card-sm" style={{ borderColor: 'rgba(224,82,82,0.3)' }}>
           <p className="text-xs text-muted" style={{ marginBottom: 4 }}>累計捐獻支出</p>
