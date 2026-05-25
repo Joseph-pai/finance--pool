@@ -148,7 +148,37 @@ export default function IncomePage() {
         confirmed_at: new Date().toISOString(),
       }).eq('id', selected.id);
 
-      // 2. 自動扣 10% 到 honor_lake
+      // 2. 淨額進入目標帳戶（pond_a 或 lake）
+      const netAmount = actualAmount - titheAmount;
+
+      if (selected.destination === 'pond_a') {
+        // 取得使用者 pond_a
+        const { data: pa } = await supabase.from('pond_a').select('current_balance').eq('user_id', selected.user_id).maybeSingle();
+        if (pa) {
+          await supabase.from('pond_a').update({ current_balance: pa.current_balance + netAmount }).eq('user_id', selected.user_id);
+        }
+      } else {
+        // 目的地是 lake
+        const { data: lake } = await supabase.from('lake').select('current_balance').eq('family_id', profile.family_id).maybeSingle();
+        if (lake) {
+          await supabase.from('lake').update({ current_balance: lake.current_balance + netAmount }).eq('family_id', profile.family_id);
+        }
+      }
+
+      // 3. 建立收入入帳 transaction（淨額）- 用 income 型別
+      await supabase.from('transactions').insert({
+        family_id: profile.family_id,
+        user_id: selected.user_id,
+        reference_id: selected.id,
+        type: 'income',
+        amount: netAmount,
+        source: null,
+        destination: selected.destination === 'lake' ? 'lake' : 'pond_a',
+        note: `收入確認：${selected.name}`,
+        transaction_date: new Date().toISOString().substring(0, 10),
+      });
+
+      // 4. 自動扣 10% 到 honor_lake
       if (titheAmount > 0) {
         // 確保 honor_lake 存在
         const { data: hl } = await supabase.from('honor_lake').select('current_balance').eq('family_id', profile.family_id).maybeSingle();
@@ -160,7 +190,6 @@ export default function IncomePage() {
           await supabase.from('honor_lake').update({ current_balance: (hl2.current_balance ?? 0) + titheAmount }).eq('family_id', profile.family_id);
         }
 
-        // 建立 transaction 記錄
         await supabase.from('transactions').insert({
           family_id: profile.family_id,
           user_id: profile.id,
