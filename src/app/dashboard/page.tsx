@@ -227,118 +227,122 @@ export default function DashboardPage() {
 
       {/* Lake Section */}
       <section style={{ marginBottom: 'var(--space-8)' }}>
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <WaterWave
-            level={lakeLevel}
-            variant="lake"
-            height={260}
-            label="🌊 家庭湖泊"
-            amount={formatTWD(displayedLakeBalance)}
-            warningLevel={warningLevel}
-          />
-          <div style={{ padding: 'var(--space-6)' }}>
-            {/* 餘額雙重顯示 */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-5)', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: 'var(--space-4)' }}>
-              <div>
-                <span className="text-xs text-muted">💧 當前餘額</span>
-                <div className="text-lg font-bold" style={{ color: 'var(--lake-safe)', marginTop: 2 }}>
-                  {formatTWD(actualLakeBalance)}
-                </div>
-              </div>
-              <div>
-                <span className="text-xs text-muted">🔮 預估餘額 (含預計收入)</span>
-                <div className="text-lg font-bold" style={{ color: 'var(--pond-a-light)', marginTop: 2 }}>
-                  {formatTWD(actualLakeBalance + pendingLakeIncome)}
-                </div>
-              </div>
+        <div className="card" style={{ padding: 'var(--space-6)' }}>
+          <div style={{ display: 'flex', flexDirection: 'row', gap: '32px', justifyContent: 'center', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 'var(--space-5)' }}>
+            {/* 預估餘額湖泊（左） */}
+            <div style={{ minWidth: 280, maxWidth: 380, flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'rgba(60,120,180,0.10)', borderRadius: 18, boxShadow: '0 2px 16px 0 rgba(0,0,0,0.08)', padding: '24px 16px 20px 16px' }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--pond-a-light)', marginBottom: 8 }}>🌊 家庭湖泊（預估餘額）</div>
+              <WaterWave
+                level={lakeLevel}
+                variant="lake"
+                height={200}
+                label="預估餘額"
+                amount={formatTWD(actualLakeBalance + pendingLakeIncome)}
+                warningLevel={warningLevel}
+              />
+              <div className="text-xs text-secondary" style={{ marginTop: 6 }}>包含已確認與所有待入帳的預計收入</div>
             </div>
 
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              {/* Prediction */}
-              <div>
-                <div className="flex items-center gap-2" style={{ marginBottom: 'var(--space-2)' }}>
-                  <span className="badge" style={{
-                    background: `${warningColors[warningLevel]}22`,
-                    color: warningColors[warningLevel],
-                  }}>
-                    {warningLabels[warningLevel]}
-                  </span>
-                  
-                  {/* 預測模式選擇器 */}
-                  <select
-                    value={predMode}
-                    onChange={(e) => {
-                      const val = e.target.value as 'current' | 'estimated';
-                      setPredMode(val);
-                      localStorage.setItem('family-pool-pred-mode', val);
-                    }}
-                    className="text-xs font-semibold"
-                    style={{
-                      background: 'rgba(255,255,255,0.08)',
-                      border: '1px solid rgba(255,255,255,0.15)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '2px 8px',
-                      color: 'var(--text-primary)',
-                      outline: 'none',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <option value="current" style={{ backgroundColor: 'var(--card-bg)' }}>當前水位預測</option>
-                    <option value="estimated" style={{ backgroundColor: 'var(--card-bg)' }}>預估餘額預測</option>
-                  </select>
-                </div>
-                {prediction?.dry_date ? (
-                  <div>
-                    <span className="text-sm text-secondary">預計乾涸日：</span>
-                    <span className="font-semibold" style={{ color: warningColors[warningLevel], marginLeft: 6 }}>
-                      {format(new Date(prediction.dry_date), 'yyyy/MM/dd')}
-                      {prediction.days_remaining !== null && (
-                        <span className="text-secondary font-normal" style={{ marginLeft: 8 }}>
-                          （還有 {prediction.days_remaining} 天）
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                ) : (
-                  <span className="text-sm text-secondary">
-                    {lake?.current_balance === 0 ? '湖泊尚未注水' : '暫無確定乾涸日期'}
-                  </span>
-                )}
-              </div>
+            {/* 當前餘額湖泊（右） */}
+            <div style={{ minWidth: 280, maxWidth: 380, flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'rgba(30,60,120,0.13)', borderRadius: 18, boxShadow: '0 2px 16px 0 rgba(0,0,0,0.08)', padding: '24px 16px 20px 16px' }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--lake-safe)', marginBottom: 8 }}>🌊 家庭湖泊（當前餘額）</div>
+              <WaterWave
+                level={lakeLevel}
+                variant="lake"
+                height={200}
+                label="當前餘額"
+                amount={formatTWD(actualLakeBalance)}
+                warningLevel={warningLevel}
+              />
+              <div className="text-xs text-secondary" style={{ marginTop: 6 }}>只包含已確認收入與已發生支出</div>
+            </div>
+          </div>
 
-              {/* Quick actions (admin or manager) */}
-              {(profile?.role === 'admin' || profile?.role === 'lake_manager') && (
-                <button className="btn btn-ghost btn-sm" onClick={() => router.push('/lake')} id="dash-manage-lake">
-                  管理湖泊 →
-                </button>
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            {/* Prediction */}
+            <div>
+              <div className="flex items-center gap-2" style={{ marginBottom: 'var(--space-2)' }}>
+                <span className="badge" style={{
+                  background: `${warningColors[warningLevel]}22`,
+                  color: warningColors[warningLevel],
+                }}>
+                  {warningLabels[warningLevel]}
+                </span>
+                
+                {/* 預測模式選擇器 */}
+                <select
+                  value={predMode}
+                  onChange={(e) => {
+                    const val = e.target.value as 'current' | 'estimated';
+                    setPredMode(val);
+                    localStorage.setItem('family-pool-pred-mode', val);
+                  }}
+                  className="text-xs font-semibold"
+                  style={{
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '2px 8px',
+                    color: 'var(--text-primary)',
+                    outline: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="current" style={{ backgroundColor: 'var(--card-bg)' }}>當前水位預測</option>
+                  <option value="estimated" style={{ backgroundColor: 'var(--card-bg)' }}>預估餘額預測</option>
+                </select>
+              </div>
+              {prediction?.dry_date ? (
+                <div>
+                  <span className="text-sm text-secondary">預計乾涸日：</span>
+                  <span className="font-semibold" style={{ color: warningColors[warningLevel], marginLeft: 6 }}>
+                    {format(new Date(prediction.dry_date), 'yyyy/MM/dd')}
+                    {prediction.days_remaining !== null && (
+                      <span className="text-secondary font-normal" style={{ marginLeft: 8 }}>
+                        （還有 {prediction.days_remaining} 天）
+                      </span>
+                    )}
+                  </span>
+                </div>
+              ) : (
+                <span className="text-sm text-secondary">
+                  {lake?.current_balance === 0 ? '湖泊尚未注水' : '暫無確定乾涸日期'}
+                </span>
               )}
             </div>
 
-            {/* Upcoming lake expenses */}
-            {lakeExpenses.length > 0 && (
-              <div style={{ marginTop: 'var(--space-5)' }}>
-                <p className="text-xs text-muted" style={{ marginBottom: 'var(--space-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  即將支出
-                </p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-                  {lakeExpenses.slice(0, 4).map((exp) => (
-                    <div key={exp.id} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-md)', padding: '6px 12px', fontSize: '0.8rem' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>{exp.name}</span>
-                      <span style={{ color: 'var(--status-error)', marginLeft: 6, fontWeight: 600 }}>
-                        -{formatTWD(exp.amount)}
-                      </span>
-                      <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>
-                        {format(new Date(exp.expected_date), 'M/d')}
-                      </span>
-                    </div>
-                  ))}
-                  {lakeExpenses.length > 4 && (
-                    <span className="text-xs text-muted" style={{ alignSelf: 'center' }}>+{lakeExpenses.length - 4} 項</span>
-                  )}
-                </div>
-              </div>
+            {/* Quick actions (admin or manager) */}
+            {(profile?.role === 'admin' || profile?.role === 'lake_manager') && (
+              <button className="btn btn-ghost btn-sm" onClick={() => router.push('/lake')} id="dash-manage-lake">
+                管理湖泊 →
+              </button>
             )}
           </div>
+
+          {/* Upcoming lake expenses */}
+          {lakeExpenses.length > 0 && (
+            <div style={{ marginTop: 'var(--space-5)' }}>
+              <p className="text-xs text-muted" style={{ marginBottom: 'var(--space-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                即將支出
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+                {lakeExpenses.slice(0, 4).map((exp) => (
+                  <div key={exp.id} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-md)', padding: '6px 12px', fontSize: '0.8rem' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>{exp.name}</span>
+                    <span style={{ color: 'var(--status-error)', marginLeft: 6, fontWeight: 600 }}>
+                      -{formatTWD(exp.amount)}
+                    </span>
+                    <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>
+                      {format(new Date(exp.expected_date), 'M/d')}
+                    </span>
+                  </div>
+                ))}
+                {lakeExpenses.length > 4 && (
+                  <span className="text-xs text-muted" style={{ alignSelf: 'center' }}>+{lakeExpenses.length - 4} 項</span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
