@@ -1,4 +1,4 @@
-import { LakeExpense, LakeRequest, DryPrediction, IncomeItem } from '@/types';
+import { LakeExpense, LakeRequest, DryPrediction, IncomeItem, ExpenseItem } from '@/types';
 import { addDays, differenceInDays, parseISO, format, isBefore, isAfter } from 'date-fns';
 
 /**
@@ -183,6 +183,7 @@ export function calcWaterLevel(balance: number, maxBalance: number): number {
  * @param approvedRequests 已批准的成員調撥申請
  * @param incomeItems 所有收入項目
  * @param endDate 截止日期（用戶選擇）
+ * @param expenseItems 所有個人計劃支出（含 source='lake' 的支出）
  */
 export function calculateLakeBalanceToDate(
   currentBalance: number,
@@ -190,6 +191,7 @@ export function calculateLakeBalanceToDate(
   approvedRequests: LakeRequest[],
   incomeItems: IncomeItem[],
   endDate: Date,
+  expenseItems: ExpenseItem[] = [],
 ): BalanceToDateResult {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -199,7 +201,7 @@ export function calculateLakeBalanceToDate(
   // 合併所有收支事件，按日期排序
   const events: { date: string; name: string; amount: number; type: 'inflow' | 'outflow' }[] = [];
 
-  // 1. 支出 (Outflows) — 固定支出
+  // 1. 支出 (Outflows) — 固定支出（管理員設定的家庭必要支出）
   lakeExpenses
     .filter(e => e.status === 'active' && e.amount > 0)
     .forEach(e => {
@@ -227,7 +229,35 @@ export function calculateLakeBalanceToDate(
       }
     });
 
-  // 2. 已批准的申請 (Outflows)
+  // 2. 個人計劃支出 (Outflows) — source='lake' 且狀態為 planned/approved（含循環）
+  expenseItems
+    .filter(e => e.source === 'lake' && (e.status === 'planned' || e.status === 'approved') && e.amount > 0)
+    .forEach(e => {
+      // 首次支出在區間內
+      if (e.expected_date >= todayStr && e.expected_date <= endStr) {
+        events.push({ date: e.expected_date, name: e.name, amount: e.amount, type: 'outflow' });
+      }
+      // 處理循環支出
+      if (e.is_recurring && e.recurrence_rule) {
+        let nextDate = parseISO(e.expected_date);
+        for (let i = 0; i < 48; i++) {
+          if (e.recurrence_rule === 'monthly') {
+            nextDate = new Date(nextDate.getFullYear(), nextDate.getMonth() + 1, nextDate.getDate());
+          } else if (e.recurrence_rule === 'quarterly') {
+            nextDate = new Date(nextDate.getFullYear(), nextDate.getMonth() + 3, nextDate.getDate());
+          } else if (e.recurrence_rule === 'yearly') {
+            nextDate = new Date(nextDate.getFullYear() + 1, nextDate.getMonth(), nextDate.getDate());
+          }
+          const futureDate = format(nextDate, 'yyyy-MM-dd');
+          if (futureDate > endStr) break;
+          if (futureDate >= todayStr) {
+            events.push({ date: futureDate, name: e.name, amount: e.amount, type: 'outflow' });
+          }
+        }
+      }
+    });
+
+  // 3. 已批准的申請 (Outflows)
   approvedRequests
     .filter(r => r.status === 'approved' && r.approved_date && r.approved_amount)
     .forEach(r => {

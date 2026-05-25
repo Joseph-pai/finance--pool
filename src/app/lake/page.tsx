@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
-import { Lake, LakeExpense, LakeRequest, DryPrediction, IncomeItem, Transaction } from '@/types';
+import { Lake, LakeExpense, LakeRequest, DryPrediction, IncomeItem, Transaction, ExpenseItem } from '@/types';
 import { formatTWD, calculateLakeDryDate, calculateLakeBalanceToDate } from '@/lib/predictions';
 import type { BalanceToDateResult } from '@/lib/predictions';
 import { format, parseISO } from 'date-fns';
@@ -25,6 +25,7 @@ export default function LakePage() {
   const [lakeRequests, setLakeRequests] = useState<LakeRequest[]>([]);
   const [incomes, setIncomes]       = useState<IncomeItem[]>([]);
   const [lakeTransactions, setLakeTransactions] = useState<Transaction[]>([]);
+  const [allExpenses, setAllExpenses] = useState<ExpenseItem[]>([]);
   const [computedLakeBalance, setComputedLakeBalance] = useState(0);
   const [prediction, setPrediction] = useState<DryPrediction | null>(null);
   const [predMode, setPredMode]     = useState<'current' | 'estimated'>('current');
@@ -61,25 +62,28 @@ export default function LakePage() {
   const load = useCallback(async () => {
     if (!profile?.family_id) return;
     setLoading(true);
-    const [lakeRes, expRes, reqRes, profRes, incRes, txRes] = await Promise.all([
+    const [lakeRes, expRes, reqRes, profRes, incRes, txRes, allExpRes] = await Promise.all([
       supabase.from('lake').select('*').eq('family_id', profile.family_id).single(),
       supabase.from('lake_expenses').select('*').eq('family_id', profile.family_id).order('expected_date'),
       supabase.from('lake_requests').select('*').eq('family_id', profile.family_id).eq('status', 'approved'),
       supabase.from('profiles').select('*').eq('family_id', profile.family_id),
       supabase.from('income_items').select('*').eq('family_id', profile.family_id),
       supabase.from('transactions').select('*').eq('family_id', profile.family_id),
+      supabase.from('expense_items').select('*').eq('family_id', profile.family_id),
     ]);
     const lakeData = lakeRes.data as Lake | null;
     const expData   = (expRes.data ?? []) as LakeExpense[];
     const reqData   = (reqRes.data ?? []) as LakeRequest[];
     const incData   = (incRes.data ?? []) as IncomeItem[];
     const txData    = (txRes.data ?? []) as Transaction[];
+    const allExpData = (allExpRes.data ?? []) as ExpenseItem[];
 
     setLake(lakeData);
     setExpenses(expData);
     setLakeRequests(reqData);
     setIncomes(incData);
     setLakeTransactions(txData);
+    setAllExpenses(allExpData);
     setMembers((profRes.data ?? []) as Profile[]);
 
     const computedLakeBalance = Math.max(0,
@@ -166,9 +170,10 @@ export default function LakePage() {
       lakeRequests,
       incomes,
       parseISO(predEndDate),
+      allExpenses,
     );
     setBalanceToDate(result);
-  }, [predEndDate, computedLakeBalance, expenses, lakeRequests, incomes]);
+  }, [predEndDate, computedLakeBalance, expenses, lakeRequests, incomes, allExpenses]);
 
 
   const openAdd = () => {
