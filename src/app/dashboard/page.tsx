@@ -176,21 +176,19 @@ export default function DashboardPage() {
 
   // 動態監聽並計算乾涸預測
   useEffect(() => {
-    if (lake) {
-      // 預估模式下使用預估餘額作為起始金額
-      const balanceForPrediction = predMode === 'estimated'
-        ? estimatedLakeBalance
-        : computedLakeBalance;
-      const pred = calculateLakeDryDate(
-        balanceForPrediction,
-        lakeExpenses,
-        lakeRequests,
-        allIncomes,
-        predMode
-      );
-      setPrediction(pred);
-    }
-  }, [lake, computedLakeBalance, estimatedLakeBalance, lakeExpenses, lakeRequests, allIncomes, predMode]);
+    const balanceForPrediction = predMode === 'estimated'
+      ? estimatedLakeBalance
+      : computedLakeBalance;
+    const pred = calculateLakeDryDate(
+      balanceForPrediction,
+      lakeExpenses,
+      lakeRequests,
+      allIncomes,
+      predMode
+    );
+    setPrediction(pred);
+  }, [computedLakeBalance, estimatedLakeBalance, lakeExpenses, lakeRequests, allIncomes, predMode]);
+
 
   const actualLakeBalance = computedLakeBalance;
   const displayedLakeBalance = actualLakeBalance;
