@@ -3,13 +3,13 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
-import { HonorLake, HonorExpense, Transaction } from '@/types';
+import { HonorLake, HonorExpense, Transaction, PondA, IncomeItem } from '@/types';
 import { formatTWD } from '@/lib/predictions';
 import { format, parseISO } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
 
 export default function HonorLakePage() {
-  const { profile, isAdmin } = useAuth();
+  const { profile, isAdmin, canManageLake } = useAuth();
   const supabase = createClient();
 
   const [honorLake, setHonorLake] = useState<HonorLake | null>(null);
@@ -27,23 +27,58 @@ export default function HonorLakePage() {
   });
   const [saving, setSaving] = useState(false);
 
+  // ── 調整奉獻金額 (管理員/湖泊管理員專用) ──
+  const [showSetBalance, setShowSetBalance] = useState(false);
+  const [newBalance, setNewBalance] = useState('');
+
+  // ── 注入奉獻 (所有成員可用) ──
+  const [showInject, setShowInject] = useState(false);
+  const [injectAmount, setInjectAmount] = useState('');
+  const [pondA, setPondA] = useState<PondA | null>(null);
+  const [incomes, setIncomes] = useState<IncomeItem[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+
   const load = useCallback(async () => {
     if (!profile?.family_id) return;
     setLoading(true);
 
-    const [hlRes, expRes, txRes] = await Promise.all([
+    const [hlRes, expRes, txRes, pARes, incRes, allTxRes] = await Promise.all([
       supabase.from('honor_lake').select('*').eq('family_id', profile.family_id).maybeSingle(),
       supabase.from('honor_expenses').select('*').eq('family_id', profile.family_id).order('expense_date', { ascending: false }),
       supabase.from('transactions').select('*').eq('family_id', profile.family_id).eq('type', 'honor_contribution').order('transaction_date', { ascending: false }),
+      supabase.from('pond_a').select('*').eq('user_id', profile.id).maybeSingle(),
+      supabase.from('income_items').select('*').eq('user_id', profile.id),
+      supabase.from('transactions').select('*').eq('family_id', profile.family_id),
     ]);
 
     setHonorLake(hlRes.data as HonorLake | null);
     setExpenses((expRes.data ?? []) as HonorExpense[]);
     setContributions((txRes.data ?? []) as Transaction[]);
+    setPondA(pARes.data as PondA | null);
+    setIncomes((incRes.data ?? []) as IncomeItem[]);
+    setTransactions((allTxRes.data ?? []) as Transaction[]);
     setLoading(false);
-  }, [profile?.family_id, supabase]);
+  }, [profile?.family_id, profile?.id, supabase]);
 
   useEffect(() => { load(); }, [load]);
+
+  // ── 計算目前用戶的 Pond A 可用餘額 ──
+  const currentPondABalance = (() => {
+    if (!pondA) return 0;
+    // 已確認且目的地為 pond_a 的收入
+    const confirmedIncome = incomes
+      .filter(i => i.status === 'confirmed' && i.destination === 'pond_a')
+      .reduce((sum, i) => sum + (i.actual_amount ?? i.amount), 0);
+    // 從 pond_a 扣除的交易
+    const deductions = transactions
+      .filter(tx => (tx.user_id ?? '') === profile?.id && tx.source === 'pond_a')
+      .reduce((sum, tx) => sum + tx.amount, 0);
+    // 從 pond_b 轉入 pond_a
+    const additions = transactions
+      .filter(tx => (tx.user_id ?? '') === profile?.id && tx.destination === 'pond_a' && tx.type === 'transfer_from_pond_b')
+      .reduce((sum, tx) => sum + tx.amount, 0);
+    return Math.max(0, confirmedIncome - deductions + additions);
+  })();
 
   const handleAddExpense = async () => {
     if (!profile?.family_id || !profile?.id) return;
@@ -112,6 +147,74 @@ export default function HonorLakePage() {
     setSaving(false);
   };
 
+  // ── 管理員調整奉獻金額 ──
+  const handleSetBalance = async () => {
+    if (!profile?.family_id || !newBalance) return;
+    const amountNum = Number(newBalance);
+    if (amountNum < 0) { alert('金額不能為負數'); return; }
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from('honor_lake')
+        .update({ current_balance: amountNum })
+        .eq('family_id', profile.family_id);
+      if (error) throw error;
+      setShowSetBalance(false);
+      setNewBalance('');
+      load();
+    } catch (err: any) {
+      alert('調整失敗：' + err.message);
+      console.error('調整奉獻金額失敗：', err);
+    }
+    setSaving(false);
+  };
+
+  // ── 成員注入奉獻 ──
+  const handleInject = async () => {
+    if (!profile?.family_id || !profile?.id) return;
+    const amt = Number(injectAmount);
+    if (!amt) return;
+    if (amt > currentPondABalance) {
+      alert(`注入金額（${formatTWD(amt)}）不能超過收入池餘額（${formatTWD(currentPondABalance)}）`);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      // 1. 增加 honor_lake 餘額
+      const { data: hl } = await supabase.from('honor_lake').select('current_balance').eq('family_id', profile.family_id).single();
+      if (!hl) {
+        // 若 honor_lake 尚未初始化，先建立
+        const { data: newHl } = await supabase.from('honor_lake').insert({ family_id: profile.family_id, current_balance: 0 }).select('current_balance').single();
+        if (!newHl) throw new Error('無法初始化榮耀湖泊');
+        await supabase.from('honor_lake').update({ current_balance: amt }).eq('family_id', profile.family_id);
+      } else {
+        await supabase.from('honor_lake').update({ current_balance: (hl.current_balance ?? 0) + amt }).eq('family_id', profile.family_id);
+      }
+
+      // 2. 建立 transaction（DB trigger 會自動從 Pond A 扣除）
+      const { error: txErr } = await supabase.from('transactions').insert({
+        family_id: profile.family_id,
+        user_id: profile.id,
+        type: 'honor_contribution',
+        amount: amt,
+        source: 'pond_a',
+        destination: 'honor_lake',
+        note: `手動注入榮耀歸主奉獻`,
+        transaction_date: new Date().toISOString().substring(0, 10),
+      });
+      if (txErr) throw txErr;
+
+      setShowInject(false);
+      setInjectAmount('');
+      load();
+    } catch (err: any) {
+      alert('注入失敗：' + err.message);
+      console.error('注入奉獻失敗：', err);
+    }
+    setSaving(false);
+  };
+
   if (loading) {
     return (
       <div className="page-container">
@@ -149,18 +252,39 @@ export default function HonorLakePage() {
 
       {/* Controls */}
       <div className="flex items-center justify-between flex-wrap gap-4" style={{ marginBottom: 'var(--space-6)' }}>
-        <div />
-        <button
-          className="btn btn-primary"
-          onClick={() => setShowAddExpense(true)}
-          disabled={!isAdmin}
-          id="honor-add-expense"
-        >
-          + 記錄捐獻支出
-        </button>
-        {!isAdmin && (
-          <span className="text-xs text-muted">僅管理員可記錄捐獻</span>
-        )}
+        <div className="flex gap-2 flex-wrap">
+          {/* 注入奉獻按鈕 — 所有成員可用 */}
+          <button
+            className="btn btn-primary"
+            onClick={() => { setInjectAmount(''); setShowInject(true); }}
+            id="honor-inject-btn"
+          >
+            🌟 注入奉獻
+          </button>
+          {/* 調整奉獻金額 — 管理員/湖泊管理員專用 */}
+          {canManageLake && (
+            <button
+              className="btn btn-ghost"
+              onClick={() => { setNewBalance(String(honorLake?.current_balance ?? 0)); setShowSetBalance(true); }}
+              id="honor-set-balance-btn"
+            >
+              調整奉獻金額
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            className="btn btn-primary"
+            onClick={() => setShowAddExpense(true)}
+            disabled={!isAdmin}
+            id="honor-add-expense"
+          >
+            + 記錄捐獻支出
+          </button>
+          {!isAdmin && (
+            <span className="text-xs text-muted">僅管理員可記錄捐獻</span>
+          )}
+        </div>
       </div>
 
       {/* 捐獻支出記錄 */}
@@ -228,7 +352,7 @@ export default function HonorLakePage() {
         )}
       </section>
 
-      {/* 新增捐獻支出 Modal */}
+      {/* ── 新增捐獻支出 Modal ── */}
       {showAddExpense && (
         <div className="modal-overlay" onClick={() => setShowAddExpense(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -287,6 +411,92 @@ export default function HonorLakePage() {
                   {saving ? '儲存中...' : '確認捐獻'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 調整奉獻金額 Modal (管理員/湖泊管理員) ── */}
+      {showSetBalance && (
+        <div className="modal-overlay" onClick={() => setShowSetBalance(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">⚙️ 調整奉獻金額</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowSetBalance(false)} id="honor-balance-close">✕</button>
+            </div>
+            <p className="text-secondary text-sm" style={{ marginBottom: 'var(--space-4)' }}>
+              直接設定榮耀歸主湖泊的可奉獻金額。調整時不會產生交易記錄。
+            </p>
+            <div className="form-group" style={{ marginBottom: 'var(--space-6)' }}>
+              <label className="form-label">可奉獻金額（台幣）</label>
+              <input
+                id="honor-balance-input"
+                type="number"
+                className="form-input"
+                placeholder="0"
+                min="0"
+                value={newBalance}
+                onChange={e => setNewBalance(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setShowSetBalance(false)} id="honor-balance-cancel">取消</button>
+              <button
+                className="btn btn-primary"
+                onClick={handleSetBalance}
+                disabled={saving || !newBalance}
+                id="honor-balance-save"
+              >
+                {saving ? '更新中...' : '確認更新'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 注入奉獻 Modal (所有成員) ── */}
+      {showInject && (
+        <div className="modal-overlay" onClick={() => setShowInject(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <div className="modal-header">
+              <h3 className="modal-title">🌟 注入榮耀歸主奉獻</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowInject(false)}>✕</button>
+            </div>
+            <p className="text-secondary text-sm" style={{ marginBottom: 'var(--space-4)' }}>
+              從您的個人收入池（Pond A）注入資金到榮耀歸主湖泊，作為額外的奉獻。
+            </p>
+            <div style={{ padding: '10px 14px', background: 'rgba(245,166,35,0.1)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-5)', border: '1px solid rgba(245,166,35,0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="text-xs" style={{ color: 'var(--status-warning)' }}>💰 您的收入池可用餘額</span>
+              <span className="text-sm font-semibold" style={{ color: 'var(--status-warning)' }}>{formatTWD(currentPondABalance)}</span>
+            </div>
+            <div className="form-group" style={{ marginBottom: 'var(--space-6)' }}>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                注入金額
+                <span className="text-xs text-muted" style={{ marginLeft: 8, fontWeight: 400 }}>
+                  （最多 {formatTWD(currentPondABalance)}）
+                </span>
+              </label>
+              <input
+                id="honor-inject-amount"
+                type="number"
+                className="form-input"
+                placeholder="0"
+                min="0"
+                max={currentPondABalance}
+                value={injectAmount}
+                onChange={e => setInjectAmount(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setShowInject(false)}>取消</button>
+              <button
+                className="btn btn-primary"
+                onClick={handleInject}
+                disabled={saving || !injectAmount || Number(injectAmount) <= 0 || Number(injectAmount) > currentPondABalance}
+                id="honor-inject-confirm"
+              >
+                {saving ? '處理中...' : '✓ 確認注入'}
+              </button>
             </div>
           </div>
         </div>
