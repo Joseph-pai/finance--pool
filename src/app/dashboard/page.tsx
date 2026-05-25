@@ -313,7 +313,7 @@ export default function DashboardPage() {
               </div>
               {prediction?.dry_date ? (
                 <div>
-                  <span className="text-sm text-secondary">預計乾涸日：</span>
+                  <span className="text-sm text-secondary">經濟安全到期日：</span>
                   <span className="font-semibold" style={{ color: warningColors[warningLevel], marginLeft: 6 }}>
                     {format(new Date(prediction.dry_date), 'yyyy/MM/dd')}
                     {prediction.days_remaining !== null && (
@@ -322,12 +322,18 @@ export default function DashboardPage() {
                       </span>
                     )}
                   </span>
+                  {prediction.deficit_amount && prediction.deficit_amount > 0 && (
+                    <div style={{ marginTop: 6, padding: '8px 12px', background: 'rgba(224,82,82,0.12)', borderRadius: 'var(--radius-sm)', fontSize: '0.85rem', color: 'var(--status-error)' }}>
+                      ⚠️ 要在 {format(new Date(prediction.dry_date), 'yyyy年MM月dd日')} 前補充 {formatTWD(prediction.deficit_amount)} 資金
+                    </div>
+                  )}
                 </div>
               ) : (
                 <span className="text-sm text-secondary">
-                  {lake?.current_balance === 0 ? '湖泊尚未注水' : '暫無確定乾涸日期'}
+                  {computedLakeBalance === 0 && estimatedLakeBalance === 0 ? '經濟安全到期日：—' : '經濟安全到期日：—'}
                 </span>
               )}
+
             </div>
 
             {/* Quick actions (admin or manager) */}

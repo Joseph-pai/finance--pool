@@ -369,17 +369,23 @@ export default function LakePage() {
                 </div>
                 {prediction?.dry_date ? (
                   <div>
-                    <span className="text-secondary text-sm">🔴 預計乾涸：</span>
+                    <span className="text-secondary text-sm">🔴 經濟安全到期日：</span>
                     <span className="font-bold" style={{ color: warningColor, marginLeft: 6 }}>
                       {format(parseISO(prediction.dry_date), 'yyyy年M月d日', { locale: zhTW })}
                       {prediction.days_remaining !== null && <span className="text-secondary font-normal" style={{ marginLeft: 8 }}>（{prediction.days_remaining} 天後）</span>}
                     </span>
+                    {prediction.deficit_amount && prediction.deficit_amount > 0 && (
+                      <div style={{ marginTop: 6, padding: '8px 12px', background: 'rgba(224,82,82,0.12)', borderRadius: 'var(--radius-sm)', fontSize: '0.85rem', color: 'var(--status-error)' }}>
+                        ⚠️ 要在 {format(new Date(prediction.dry_date), 'yyyy年MM月dd日')} 前補充 {formatTWD(prediction.deficit_amount)} 資金
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <span className="text-secondary text-sm">
-                    {lakeStatusMessage}
+                    經濟安全到期日：—
                   </span>
                 )}
+
               </div>
               <div className="flex gap-2">
                 <button className="btn btn-primary" onClick={() => setModal('inject')} id="lake-inject-member-btn">

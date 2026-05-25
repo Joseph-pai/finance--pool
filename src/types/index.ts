@@ -155,11 +155,13 @@ export interface Notification {
 
 // 乾涸預測計算結果
 export interface DryPrediction {
-  dry_date: string | null;       // 預計乾涸日期，null 表示不會乾涸
+  dry_date: string | null;       // 預計乾涸日期（經濟安全到期日），null 表示不會乾涸
   days_remaining: number | null; // 剩餘天數
   warning_level: 'safe' | 'warning' | 'danger' | 'critical'; // 警示等級
   scheduled_outflows: { date: string; name: string; amount: number; cumulative: number }[];
+  deficit_amount?: number;       // 到期日時資金短缺金額（若為負值）
 }
+
 
 // 儀表板用的成員池塘摘要
 export interface MemberPondSummary {

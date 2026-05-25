@@ -109,11 +109,14 @@ export function calculateLakeDryDate(
 
   if (dryDate) {
     const daysRemaining = differenceInDays(parseISO(dryDate), today);
+    // 計算到期時資金短缺金額（remaining 為負值代表短缺）
+    const deficitAmount = remaining < 0 ? Math.abs(remaining) : 0;
     return {
       dry_date: dryDate,
       days_remaining: daysRemaining,
       warning_level: getWarningLevel(daysRemaining),
       scheduled_outflows: scheduled,
+      deficit_amount: deficitAmount,
     };
   }
 
@@ -123,7 +126,9 @@ export function calculateLakeDryDate(
     days_remaining: null,
     warning_level: 'safe',
     scheduled_outflows: scheduled,
+    deficit_amount: 0,
   };
+
 }
 
 function getWarningLevel(days: number): DryPrediction['warning_level'] {
