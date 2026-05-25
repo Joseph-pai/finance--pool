@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
 import { Lake, LakeExpense, LakeRequest, DryPrediction, IncomeItem, Transaction } from '@/types';
-import { formatTWD, calculateLakeDryDate } from '@/lib/predictions';
+import { formatTWD, calculateLakeDryDate, calculateLakeBalanceToDate } from '@/lib/predictions';
+import type { BalanceToDateResult } from '@/lib/predictions';
 import { format, parseISO } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
 import { useRouter } from 'next/navigation';
@@ -27,7 +28,8 @@ export default function LakePage() {
   const [computedLakeBalance, setComputedLakeBalance] = useState(0);
   const [prediction, setPrediction] = useState<DryPrediction | null>(null);
   const [predMode, setPredMode]     = useState<'current' | 'estimated'>('current');
-  const [predFromDate, setPredFromDate] = useState<string>('');
+  const [predEndDate, setPredEndDate] = useState<string>('');
+  const [balanceToDate, setBalanceToDate] = useState<BalanceToDateResult | null>(null);
   const [loading, setLoading]       = useState(true);
   const [modal, setModal]           = useState<ModalMode>(null);
   const [selected, setSelected]     = useState<LakeExpense | null>(null);
@@ -136,23 +138,38 @@ export default function LakePage() {
   // 預估餘額 = 當前餘額 + 待入帳收入 - 已批准申請 - 啟用中支出
   const estimatedLakeBalance = computedLakeBalance + pendingLakeIncome - approvedLakeRequests - activeLakeExpensesTotal;
 
-  // 動態監聽並計算乾涸預測（起始餘額永遠使用當前餘額，避免雙重計算）
+  // 動態監聽並計算乾涸預測（永遠使用今天為起始日）
   useEffect(() => {
-    const fromDate = predFromDate ? parseISO(predFromDate) : undefined;
     const pred = calculateLakeDryDate(
       computedLakeBalance,
       expenses.filter(e => e.status === 'active'),
       lakeRequests,
       incomes,
       predMode,
-      fromDate,
     );
     setPrediction(pred);
     // 非同步更新資料庫中儲存的乾涸日期
     if (lake) {
       supabase.from('lake').update({ dry_date: pred.dry_date ?? null }).eq('id', lake.id).then();
     }
-  }, [computedLakeBalance, expenses, lakeRequests, incomes, predMode, supabase, lake, predFromDate]);
+  }, [computedLakeBalance, expenses, lakeRequests, incomes, predMode, supabase, lake]);
+
+  // 當截止日選擇後，計算資金缺口/充裕分析
+  useEffect(() => {
+    if (!predEndDate) {
+      setBalanceToDate(null);
+      return;
+    }
+    const result = calculateLakeBalanceToDate(
+      computedLakeBalance,
+      expenses.filter(e => e.status === 'active'),
+      lakeRequests,
+      incomes,
+      parseISO(predEndDate),
+      predMode,
+    );
+    setBalanceToDate(result);
+  }, [predEndDate, computedLakeBalance, expenses, lakeRequests, incomes, predMode]);
 
 
   const openAdd = () => {
@@ -366,21 +383,21 @@ export default function LakePage() {
                     <option value="current" style={{ backgroundColor: 'var(--card-bg)' }}>當前水位預測</option>
                     <option value="estimated" style={{ backgroundColor: 'var(--card-bg)' }}>預估餘額預測</option>
                   </select>
-                  <span className="text-xs text-muted" style={{ margin: '0 4px' }}>起始日</span>
+                  <span className="text-xs text-muted" style={{ margin: '0 4px' }}>截止日</span>
                   <input
                     type="date"
-                    value={predFromDate}
-                    onChange={e => setPredFromDate(e.target.value)}
+                    value={predEndDate}
+                    onChange={e => setPredEndDate(e.target.value)}
                     className="form-input"
                     style={{ width: 150, padding: '2px 8px', fontSize: '0.8rem', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 'var(--radius-md)', color: 'var(--text-primary)', outline: 'none' }}
-                    title="選擇預測起始日期（預設為今天）"
+                    title="選擇截止日期，計算從今天到該日期間的資金缺口或充裕結餘"
                   />
-                  {predFromDate && (
+                  {predEndDate && (
                     <button
                       className="btn btn-ghost btn-sm"
-                      onClick={() => setPredFromDate('')}
+                      onClick={() => setPredEndDate('')}
                       style={{ padding: '2px 6px', fontSize: '0.7rem' }}
-                      title="重設回今天"
+                      title="清除截止日"
                     >✕</button>
                   )}
                 </div>
@@ -401,6 +418,66 @@ export default function LakePage() {
                   <span className="text-secondary text-sm">
                     經濟安全到期日：—
                   </span>
+                )}
+
+                {/* 截止日資金分析 */}
+                {predEndDate && balanceToDate && (
+                  <div style={{
+                    marginTop: 'var(--space-4)',
+                    padding: 'var(--space-4)',
+                    borderRadius: 'var(--radius-md)',
+                    background: balanceToDate.is_surplus
+                      ? 'rgba(40,167,69,0.08)'
+                      : 'rgba(224,82,82,0.10)',
+                    border: `1px solid ${balanceToDate.is_surplus ? 'rgba(40,167,69,0.25)' : 'rgba(224,82,82,0.25)'}`,
+                  }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 'var(--space-2)' }}>
+                      📊 截止至 {format(parseISO(balanceToDate.end_date), 'yyyy/MM/dd')} 資金分析
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-4)', fontSize: '0.82rem' }}>
+                      <div>
+                        <span className="text-muted">起始餘額：</span>
+                        <span style={{ fontWeight: 600 }}>{formatTWD(balanceToDate.starting_balance)}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted">預計收入：</span>
+                        <span style={{ color: 'var(--status-success)', fontWeight: 600 }}>+{formatTWD(balanceToDate.total_inflow)}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted">預計支出：</span>
+                        <span style={{ color: 'var(--status-error)', fontWeight: 600 }}>-{formatTWD(balanceToDate.total_outflow)}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted">預估餘額：</span>
+                        <span style={{
+                          fontWeight: 700,
+                          fontSize: '0.95rem',
+                          color: balanceToDate.is_surplus ? 'var(--status-success)' : 'var(--status-error)',
+                        }}>
+                          {formatTWD(Math.abs(balanceToDate.ending_balance))}
+                          {balanceToDate.is_surplus ? ' (充裕)' : ' (缺口)'}
+                        </span>
+                      </div>
+                    </div>
+                    {balanceToDate.events.length > 0 && (
+                      <details style={{ marginTop: 'var(--space-3)' }}>
+                        <summary style={{ cursor: 'pointer', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                          查看明細（{balanceToDate.events.length} 筆）
+                        </summary>
+                        <div style={{ marginTop: 'var(--space-2)', maxHeight: 200, overflowY: 'auto' }}>
+                          {balanceToDate.events.map((ev, i) => (
+                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '0.78rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                              <span style={{ color: 'var(--text-muted)' }}>{format(parseISO(ev.date), 'M/d')}</span>
+                              <span>{ev.name}</span>
+                              <span style={{ fontWeight: 600, color: ev.type === 'inflow' ? 'var(--status-success)' : 'var(--status-error)' }}>
+                                {ev.type === 'inflow' ? '+' : '-'}{formatTWD(ev.amount)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </div>
                 )}
 
               </div>

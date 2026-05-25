@@ -333,28 +333,32 @@ export default function DashboardPage() {
                   <option value="estimated" style={{ backgroundColor: 'var(--card-bg)' }}>預估餘額預測</option>
                 </select>
               </div>
-              {prediction?.dry_date ? (
                 <div>
                   <span className="text-sm text-secondary">經濟安全到期日：</span>
-                  <span className="font-semibold" style={{ color: warningColors[warningLevel], marginLeft: 6 }}>
-                    {format(new Date(prediction.dry_date), 'yyyy/MM/dd')}
-                    {prediction.days_remaining !== null && (
-                      <span className="text-secondary font-normal" style={{ marginLeft: 8 }}>
-                        （還有 {prediction.days_remaining} 天）
+                  {prediction?.dry_date ? (
+                    <>
+                      <span className="font-semibold" style={{ color: warningColors[warningLevel], marginLeft: 6 }}>
+                        {format(new Date(prediction.dry_date), 'yyyy/MM/dd')}
+                        {prediction.days_remaining !== null && (
+                          <span className="text-secondary font-normal" style={{ marginLeft: 8 }}>
+                            （還有 {prediction.days_remaining} 天）
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </span>
-                  {prediction.deficit_amount && prediction.deficit_amount > 0 && (
-                    <div style={{ marginTop: 6, padding: '8px 12px', background: 'rgba(224,82,82,0.12)', borderRadius: 'var(--radius-sm)', fontSize: '0.85rem', color: 'var(--status-error)' }}>
-                      ⚠️ 要在 {format(new Date(prediction.dry_date), 'yyyy年MM月dd日')} 前補充 {formatTWD(prediction.deficit_amount)} 資金
-                    </div>
+                      {prediction.deficit_amount && prediction.deficit_amount > 0 && (
+                        <div style={{ marginTop: 6, padding: '8px 12px', background: 'rgba(224,82,82,0.12)', borderRadius: 'var(--radius-sm)', fontSize: '0.85rem', color: 'var(--status-error)' }}>
+                          ⚠️ 要在 {format(new Date(prediction.dry_date), 'yyyy年MM月dd日')} 前補充 {formatTWD(prediction.deficit_amount)} 資金
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-secondary font-normal" style={{ marginLeft: 6 }}>
+                      {computedLakeBalance <= 0 || prediction?.scheduled_outflows?.length === 0
+                        ? '—（請先補充湖泊資金）'
+                        : '✅ 暫無經濟安全風險'}
+                    </span>
                   )}
                 </div>
-              ) : (
-                <span className="text-sm text-secondary">
-                  {computedLakeBalance === 0 && estimatedLakeBalance === 0 ? '經濟安全到期日：—' : '經濟安全到期日：—'}
-                </span>
-              )}
 
             </div>
 
