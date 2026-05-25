@@ -25,6 +25,10 @@ export default function RequestsPage() {
 
   const [saving, setSaving]     = useState(false);
 
+  // 多選批量操作
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchAction, setBatchAction] = useState<'approve' | 'reject' | 'delete' | null>(null);
+
   const load = useCallback(async () => {
     if (!profile?.family_id) return;
     setLoading(true);
@@ -34,6 +38,7 @@ export default function RequestsPage() {
       .eq('family_id', profile.family_id)
       .order('created_at', { ascending: false });
     setRequests((data ?? []) as (LakeRequest & { profile?: Profile })[]);
+    setSelectedIds(new Set());
     setLoading(false);
   }, [profile?.family_id, supabase]);
 
@@ -53,7 +58,6 @@ export default function RequestsPage() {
     setSaving(true);
     const approvedAmt = Number(reviewForm.approved_amount);
 
-    // 1. 更新申請狀態與紀錄 (交易紀錄完全交由 Supabase 觸發器 trg_lake_request_transaction_sync 自動產生，確保雙向同步)
     await supabase.from('lake_requests').update({
       status: 'approved',
       approved_amount: approvedAmt,
@@ -62,7 +66,6 @@ export default function RequestsPage() {
       reviewed_at: new Date().toISOString(),
     }).eq('id', reviewModal.id);
 
-    // 2. 通知申請者
     await supabase.from('notifications').insert({
       user_id: reviewModal.requester_id,
       family_id: profile.family_id,
@@ -141,6 +144,100 @@ export default function RequestsPage() {
     }
   };
 
+  // ---- 批量操作 ----
+
+  const handleSelectAll = () => {
+    const current = filtered;
+    if (selectedIds.size === current.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(current.map(r => r.id)));
+    }
+  };
+
+  const handleToggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const confirmBatchAction = (action: 'approve' | 'reject' | 'delete') => {
+    setBatchAction(action);
+  };
+
+  const executeBatchAction = async () => {
+    if (!batchAction || !profile) return;
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+
+    setSaving(true);
+
+    if (batchAction === 'approve') {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const now = new Date().toISOString();
+      const { data: batchData } = await supabase
+        .from('lake_requests')
+        .select('*')
+        .in('id', ids);
+      const items = (batchData ?? []) as LakeRequest[];
+
+      // 逐筆處理（因無法使用資料庫子查詢優化）
+      for (const item of items) {
+        if (item.status !== 'pending') continue;
+        const approvedAmt = item.requested_amount;
+        await supabase.from('lake_requests').update({
+          status: 'approved',
+          approved_amount: approvedAmt,
+          approved_date: today,
+          reviewed_at: now,
+        }).eq('id', item.id);
+
+        await supabase.from('notifications').insert({
+          user_id: item.requester_id,
+          family_id: profile.family_id,
+          type: 'request_approved',
+          title: '湖泊調撥申請已批准（批量）',
+          message: `您申請的「${item.item_name}」已批量批准，金額 ${formatTWD(approvedAmt)}，預計 ${today} 到帳`,
+          reference_id: item.id,
+        });
+      }
+    } else if (batchAction === 'reject') {
+      const now = new Date().toISOString();
+      const { data: batchData } = await supabase
+        .from('lake_requests')
+        .select('*')
+        .in('id', ids);
+      const items = (batchData ?? []) as LakeRequest[];
+
+      for (const item of items) {
+        if (item.status !== 'pending') continue;
+        await supabase.from('lake_requests').update({
+          status: 'rejected',
+          admin_note: '批量拒絕',
+          reviewed_at: now,
+        }).eq('id', item.id);
+
+        await supabase.from('notifications').insert({
+          user_id: item.requester_id,
+          family_id: profile.family_id,
+          type: 'request_rejected',
+          title: '湖泊調撥申請未通過（批量）',
+          message: `您申請的「${item.item_name}」已被批量拒絕`,
+          reference_id: item.id,
+        });
+      }
+    } else if (batchAction === 'delete') {
+      for (const id of ids) {
+        await supabase.from('lake_requests').delete().eq('id', id);
+      }
+    }
+
+    setSaving(false);
+    setBatchAction(null);
+    load();
+  };
+
   const filtered = requests.filter(r => filter === 'all' || r.status === filter);
 
   const statusConfig: Record<string, { text: string; badge: string; icon: string }> = {
@@ -148,6 +245,9 @@ export default function RequestsPage() {
     approved: { text: '已批准', badge: 'badge-success', icon: '✅' },
     rejected: { text: '已拒絕', badge: 'badge-error',   icon: '❌' },
   };
+
+  const selectedCount = selectedIds.size;
+  const pendingSelected = filtered.filter(r => selectedIds.has(r.id) && r.status === 'pending').length;
 
   return (
     <div className="page-container">
@@ -174,6 +274,68 @@ export default function RequestsPage() {
         ))}
       </div>
 
+      {/* 批量操作按鈕列 */}
+      {canManageLake && selectedCount > 0 && (
+        <div style={{
+          marginBottom: 'var(--space-4)',
+          padding: '10px 16px',
+          background: 'rgba(26,111,181,0.12)',
+          border: '1px solid rgba(26,111,181,0.25)',
+          borderRadius: 'var(--radius-md)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 8,
+        }}>
+          <span className="text-sm font-semibold" style={{ color: 'var(--text-accent)' }}>
+            ✓ 已選取 {selectedCount} 項
+            {pendingSelected > 0 && selectedCount > pendingSelected && (
+              <span className="text-muted font-normal" style={{ marginLeft: 6 }}>
+                （其中 {pendingSelected} 項待審批可操作）
+              </span>
+            )}
+          </span>
+          <div className="flex gap-2">
+            {pendingSelected > 0 && (
+              <>
+                <button
+                  className="btn btn-success btn-sm"
+                  onClick={() => confirmBatchAction('approve')}
+                  disabled={saving}
+                  id="req-batch-approve"
+                >
+                  ✅ 批量批准
+                </button>
+                <button
+                  className="btn btn-danger btn-sm"
+                  onClick={() => confirmBatchAction('reject')}
+                  disabled={saving}
+                  id="req-batch-reject"
+                >
+                  ❌ 批量拒絕
+                </button>
+              </>
+            )}
+            <button
+              className="btn btn-danger btn-sm"
+              onClick={() => confirmBatchAction('delete')}
+              disabled={saving}
+              id="req-batch-delete"
+            >
+              🗑️ 批量刪除
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setSelectedIds(new Set())}
+              disabled={saving}
+            >
+              取消選取
+            </button>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
           {[1,2,3].map(i => <div key={i} className="skeleton" style={{ height: 80, borderRadius: 'var(--radius-md)' }} />)}
@@ -186,13 +348,48 @@ export default function RequestsPage() {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          {/* 全選列 */}
+          {canManageLake && filtered.length > 0 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '6px 12px',
+              fontSize: '0.85rem',
+              color: 'var(--text-muted)',
+            }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={selectedIds.size === filtered.length}
+                  onChange={handleSelectAll}
+                  style={{ width: 16, height: 16, cursor: 'pointer' }}
+                />
+                <span>全選（{filtered.length} 項）</span>
+              </label>
+            </div>
+          )}
+
           {filtered.map((req) => {
             const sc = statusConfig[req.status] ?? statusConfig.pending;
             const isPending = req.status === 'pending';
 
             return (
-              <div key={req.id} className="card" style={{ borderColor: req.status === 'pending' ? 'rgba(245,166,35,0.25)' : undefined }}>
-                <div className="flex items-start justify-between flex-wrap gap-4">
+              <div key={req.id} className="card" style={{
+                borderColor: req.status === 'pending' ? 'rgba(245,166,35,0.25)' : undefined,
+                display: 'flex', alignItems: 'flex-start', gap: 12,
+              }}>
+                {/* 多選核取方塊 */}
+                {canManageLake && (
+                  <div style={{ paddingTop: 6, flexShrink: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(req.id)}
+                      onChange={() => handleToggleSelect(req.id)}
+                      style={{ width: 18, height: 18, cursor: 'pointer' }}
+                    />
+                  </div>
+                )}
+
+                <div className="flex items-start justify-between flex-wrap gap-4" style={{ flex: 1, minWidth: 0 }}>
                   <div className="flex gap-3" style={{ flex: 1 }}>
                     <div style={{ fontSize: '1.5rem', flexShrink: 0, marginTop: 2 }}>{sc.icon}</div>
                     <div style={{ flex: 1 }}>
@@ -228,7 +425,7 @@ export default function RequestsPage() {
                   </div>
 
                   {/* Actions */}
-                  <div className="flex gap-2">
+                  <div className="flex gap-2" style={{ flexShrink: 0 }}>
                     {/* 一般審審批 */}
                     {canManageLake && isPending && (
                       <button className="btn btn-primary btn-sm" onClick={() => openReview(req)} id={`req-review-${req.id}`}>
@@ -354,6 +551,53 @@ export default function RequestsPage() {
                   {saving ? '儲存中...' : '✓ 儲存變更'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 批量操作確認對話框 */}
+      {batchAction && (
+        <div className="modal-overlay" onClick={() => setBatchAction(null)}>
+          <div className="modal" style={{ maxWidth: 450 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">
+                {batchAction === 'approve' ? '✅ 批量批准' :
+                 batchAction === 'reject' ? '❌ 批量拒絕' : '🗑️ 批量刪除'}
+              </h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setBatchAction(null)}>✕</button>
+            </div>
+            <div style={{ marginBottom: 'var(--space-5)' }}>
+              <p className="text-sm" style={{ marginBottom: 'var(--space-3)' }}>
+                確定要對以下 {selectedIds.size} 項申請執行
+                <strong>
+                  {batchAction === 'approve' ? ' 批量批准' :
+                   batchAction === 'reject' ? ' 批量拒絕' : ' 批量刪除'}
+                </strong>
+                操作？
+              </p>
+              {batchAction === 'approve' && (
+                <div style={{ padding: '10px 14px', background: 'rgba(34,200,112,0.08)', borderRadius: 'var(--radius-sm)', fontSize: '0.85rem', color: 'var(--status-success)' }}>
+                  ℹ️ 批量批准將以申請金額（requested_amount）為準，到帳日設為今天。
+                </div>
+              )}
+              {batchAction === 'delete' && (
+                <div style={{ padding: '10px 14px', background: 'rgba(224,82,82,0.08)', borderRadius: 'var(--radius-sm)', fontSize: '0.85rem', color: 'var(--status-error)' }}>
+                  ⚠️ 刪除操作無法復原！若申請已批准，關聯交易將同步移除。
+                </div>
+              )}
+              {batchAction === 'reject' && (
+                <div style={{ padding: '10px 14px', background: 'rgba(245,166,35,0.08)', borderRadius: 'var(--radius-sm)', fontSize: '0.85rem', color: 'var(--status-warning)' }}>
+                  ℹ️ 批量拒絕將拒絕對話框中選取的所有待審批申請。
+                </div>
+              )}
+            </div>
+            <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setBatchAction(null)}>取消</button>
+              <button className={`btn ${batchAction === 'approve' ? 'btn-success' : 'btn-danger'}`}
+                onClick={executeBatchAction} disabled={saving} id={`req-batch-confirm-${batchAction}`}>
+                {saving ? '處理中...' : '確認執行'}
+              </button>
             </div>
           </div>
         </div>
