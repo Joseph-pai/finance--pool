@@ -291,15 +291,12 @@ export default function LakePage() {
       ) : (
         <>
           {/* Lake Status */}
-          <div className="card" style={{ marginBottom: 'var(--space-8)', padding: 'var(--space-6)' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                <div>
-                  <span className="text-xs text-muted">🌊 當前水位</span>
-                  <div className="text-lg font-bold" style={{ color: 'var(--lake-safe)', marginTop: 4 }}>
-                    {formatTWD(currentLakeBalance)}
-                  </div>
-                </div>
+
+          <div className="card" style={{ marginBottom: 'var(--space-8)', padding: 'var(--space-6)', background: 'rgba(30,60,120,0.10)' }}>
+            <div style={{ display: 'flex', flexDirection: 'row', gap: '48px', justifyContent: 'center', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 'var(--space-5)' }}>
+              {/* 當前餘額湖泊 */}
+              <div style={{ minWidth: 320, maxWidth: 400, flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'rgba(30,60,120,0.13)', borderRadius: 18, boxShadow: '0 2px 16px 0 rgba(0,0,0,0.08)', padding: '32px 16px 24px 16px', margin: 8 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--lake-safe)', marginBottom: 8 }}>家庭湖泊（當前餘額）</div>
                 <WaterWave
                   level={currentWaterLevel}
                   variant="lake"
@@ -308,18 +305,13 @@ export default function LakePage() {
                   amount={formatTWD(currentLakeBalance)}
                   warningLevel={prediction?.warning_level ?? 'safe'}
                 />
+                <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--lake-safe)', marginTop: 12 }}>{formatTWD(currentLakeBalance)}</div>
+                <div className="text-xs text-secondary" style={{ marginTop: 6 }}>只包含已確認收入與已發生支出</div>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                <div>
-                  <span className="text-xs text-muted">🔮 預估水位</span>
-                  <div className="text-lg font-bold" style={{ color: 'var(--pond-a-light)', marginTop: 4 }}>
-                    {formatTWD(estimatedLakeBalance)}
-                  </div>
-                  <div className="text-xs text-secondary" style={{ marginTop: 4 }}>
-                    含已確認與尚未確認的預計收入
-                  </div>
-                </div>
+              {/* 預估餘額湖泊 */}
+              <div style={{ minWidth: 320, maxWidth: 400, flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'rgba(60,120,180,0.10)', borderRadius: 18, boxShadow: '0 2px 16px 0 rgba(0,0,0,0.08)', padding: '32px 16px 24px 16px', margin: 8 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--pond-a-light)', marginBottom: 8 }}>家庭湖泊（預估餘額）</div>
                 <WaterWave
                   level={estimatedWaterLevel}
                   variant="lake"
@@ -328,6 +320,8 @@ export default function LakePage() {
                   amount={formatTWD(estimatedLakeBalance)}
                   warningLevel={prediction?.warning_level ?? 'safe'}
                 />
+                <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--pond-a-light)', marginTop: 12 }}>{formatTWD(estimatedLakeBalance)}</div>
+                <div className="text-xs text-secondary" style={{ marginTop: 6 }}>包含已確認與所有待入帳的預計收入</div>
               </div>
             </div>
 
