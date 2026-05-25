@@ -353,7 +353,7 @@ export default function DashboardPage() {
                     </>
                   ) : (
                     <span className="text-secondary font-normal" style={{ marginLeft: 6 }}>
-                      {computedLakeBalance <= 0 || prediction?.scheduled_outflows?.length === 0
+                      {computedLakeBalance <= 0
                         ? '—（請先補充湖泊資金）'
                         : '✅ 暫無經濟安全風險'}
                     </span>
