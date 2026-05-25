@@ -242,13 +242,13 @@ export default function DashboardPage() {
               <div>
                 <span className="text-xs text-muted">💧 當前餘額</span>
                 <div className="text-lg font-bold" style={{ color: 'var(--lake-safe)', marginTop: 2 }}>
-                  {formatTWD(lake?.current_balance ?? 0)}
+                  {formatTWD(actualLakeBalance)}
                 </div>
               </div>
               <div>
                 <span className="text-xs text-muted">🔮 預估餘額 (含預計收入)</span>
                 <div className="text-lg font-bold" style={{ color: 'var(--pond-a-light)', marginTop: 2 }}>
-                  {formatTWD((lake?.current_balance ?? 0) + pendingLakeIncome)}
+                  {formatTWD(actualLakeBalance + pendingLakeIncome)}
                 </div>
               </div>
             </div>
