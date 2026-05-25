@@ -140,12 +140,12 @@ export default function ExpensesPage() {
           const { data: insertedItems } = await supabase.from('expense_items').insert(occurrences).select();
           
           if (form.source === 'lake' && insertedItems && insertedItems.length > 0) {
-            // 批量新增調撥申請
+            // 批量新增調撥申請（使用 amountNum 確保金額正確）
             const requests = insertedItems.map(item => ({
               requester_id: targetUserId,
               family_id: profile.family_id,
               item_name: item.name,
-              requested_amount: item.amount,
+              requested_amount: amountNum,
               requested_date: item.expected_date,
               reason: form.reason || `循環支出申請：${item.name}`,
               status: 'pending',
@@ -163,7 +163,7 @@ export default function ExpensesPage() {
                     family_id: profile.family_id,
                     type: 'lake_request',
                     title: '新的湖泊調撥申請 (循環)',
-                    message: `${profile.display_name} 申請使用湖泊資金 ${formatTWD(item.amount)} 用於「${item.name}」`,
+                    message: `${profile.display_name} 申請使用湖泊資金 ${formatTWD(amountNum)} 用於「${item.name}」`,
                     reference_id: item.id,
                   });
                 });
