@@ -127,13 +127,49 @@ export default function IncomePage() {
     setSaving(false);
   };
 
+  /** 確保 family 有 honor_lake 記錄，若無則自動建立 */
+  const ensureHonorLake = useCallback(async () => {
+    if (!profile?.family_id) return;
+    const { data } = await supabase.from('honor_lake').select('id').eq('family_id', profile.family_id).maybeSingle();
+    if (!data) {
+      await supabase.from('honor_lake').insert({ family_id: profile.family_id, current_balance: 0 });
+    }
+  }, [profile?.family_id, supabase]);
+
+  /** 建立什一貢獻 transaction */
+  const createTitheTransaction = useCallback(async (
+    userId: string, incomeItemId: string, amount: number, titheAmount: number
+  ) => {
+    if (!profile?.family_id || titheAmount <= 0) return;
+    // 更新 honor_lake 餘額
+    const { data: hl } = await supabase.from('honor_lake').select('current_balance').eq('family_id', profile.family_id).single();
+    if (hl) {
+      await supabase.from('honor_lake').update({ current_balance: hl.current_balance + titheAmount }).eq('family_id', profile.family_id);
+    }
+    // 建立 transaction
+    await supabase.from('transactions').insert({
+      family_id: profile.family_id,
+      user_id: userId,
+      reference_id: incomeItemId,
+      type: 'honor_contribution',
+      amount: titheAmount,
+      source: 'pond_a',
+      destination: 'honor_lake',
+      note: `什一奉獻（${form.name}）`,
+      transaction_date: new Date().toISOString().substring(0, 10),
+    });
+  }, [profile?.family_id, supabase, form.name]);
+
   const handleSave = async (editType?: 'single' | 'future') => {
     if (!profile?.family_id) return;
     setSaving(true);
     const targetUserId = form.user_id || profile.id;
     const amountNum = Number(form.amount);
+    const titheAmount = Math.round(amountNum * 10) / 100; // 固定 10%
 
     if (modal === 'add') {
+      await ensureHonorLake();
+
       if (form.is_recurring) {
         const recurrence_group_id = crypto.randomUUID();
         const occurrences: any[] = [];
@@ -155,6 +191,8 @@ export default function IncomePage() {
             recurrence_end_date: form.recurrence_end_date,
             recurrence_group_id,
             status: 'pending',
+            tithe_percentage: 10,
+            tithe_amount: titheAmount,
           });
 
           if (form.recurrence_rule === 'monthly') {
@@ -168,10 +206,16 @@ export default function IncomePage() {
           }
         }
         if (occurrences.length > 0) {
-          await supabase.from('income_items').insert(occurrences);
+          const { data: inserted } = await supabase.from('income_items').insert(occurrences).select();
+          // 每筆循環收入立即扣什一
+          if (inserted) {
+            for (const item of inserted) {
+              await createTitheTransaction(targetUserId, item.id, amountNum, titheAmount);
+            }
+          }
         }
       } else {
-        await supabase.from('income_items').insert({
+        const { data: inserted } = await supabase.from('income_items').insert({
           name: form.name,
           expected_date: form.expected_date,
           amount: amountNum,
@@ -180,7 +224,13 @@ export default function IncomePage() {
           destination: form.destination,
           is_recurring: false,
           status: 'pending',
-        });
+          tithe_percentage: 10,
+          tithe_amount: titheAmount,
+        }).select();
+        // 立即扣什一
+        if (inserted && inserted.length > 0) {
+          await createTitheTransaction(targetUserId, inserted[0].id, amountNum, titheAmount);
+        }
       }
       closeModal();
       load();
@@ -374,6 +424,8 @@ export default function IncomePage() {
   const totalConfirmed = myItems.filter(i => i.status === 'confirmed').reduce((s, i) => s + (i.actual_amount ?? i.amount), 0);
   const currentUserPondABalance = profile ? calculateUserPondABalance(items, transactions, profile.id) : 0;
   const currentUserPendingLakeAmount = profile ? calculatePendingLakeAmount(items, profile.id) : 0;
+  const totalTithe = myItems.reduce((s, i) => s + (i.tithe_amount ?? 0), 0);
+
 
   const statusLabel: Record<string, { text: string; badge: string }> = {
     pending:   { text: '待確認', badge: 'badge-warning' },
@@ -409,11 +461,16 @@ export default function IncomePage() {
           <p className="text-xs text-muted" style={{ marginBottom: 4 }}>待入湖泊預計收入</p>
           <p className="amount-display amount-medium" style={{ color: 'var(--status-info)' }}>{formatTWD(currentUserPendingLakeAmount)}</p>
         </div>
+        <div className="card card-sm" style={{ borderColor: 'rgba(245,166,35,0.3)' }}>
+          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>🌟 什一奉獻累計</p>
+          <p className="amount-display amount-medium" style={{ color: 'var(--status-warning)' }}>{formatTWD(totalTithe)}</p>
+        </div>
         <div className="card card-sm">
           <p className="text-xs text-muted" style={{ marginBottom: 4 }}>收入筆數</p>
           <p className="amount-display amount-medium">{myItems.length}</p>
         </div>
       </div>
+
 
       {/* Controls */}
       <div className="flex items-center justify-between flex-wrap gap-4" style={{ marginBottom: 'var(--space-6)' }}>

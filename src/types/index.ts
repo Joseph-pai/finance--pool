@@ -6,10 +6,12 @@ export type IncomeStatus = 'pending' | 'confirmed' | 'failed';
 export type ExpenseSource = 'pond_a' | 'lake';
 export type ExpenseStatus = 'planned' | 'approved' | 'rejected' | 'completed';
 export type RequestStatus = 'pending' | 'approved' | 'rejected';
-export type TransactionType = 'income' | 'expense' | 'transfer_to_lake' | 'lake_expense' | 'lake_to_member' | 'transfer_to_pond_b' | 'transfer_from_pond_b';
+export type TransactionType = 'income' | 'expense' | 'transfer_to_lake' | 'lake_expense' | 'lake_to_member' | 'transfer_to_pond_b' | 'transfer_from_pond_b' | 'honor_contribution' | 'honor_expense';
+
 export type RecurrenceRule = 'monthly' | 'quarterly' | 'yearly';
 export type LakeExpenseStatus = 'active' | 'paused' | 'completed';
-export type NotificationSource = 'lake' | 'pond_a' | 'pond_b';
+export type NotificationSource = 'lake' | 'pond_a' | 'pond_b' | 'honor_lake';
+
 
 export interface Family {
   id: string;
@@ -34,6 +36,25 @@ export interface Lake {
   created_at: string;
   updated_at: string;
 }
+
+export interface HonorLake {
+  id: string;
+  family_id: string;
+  current_balance: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HonorExpense {
+  id: string;
+  family_id: string;
+  recipient: string;
+  amount: number;
+  expense_date: string;
+  note?: string | null;
+  created_at: string;
+}
+
 
 export interface PondA {
   id: string;
@@ -71,10 +92,13 @@ export interface IncomeItem {
   recurrence_start_date?: string | null;
   recurrence_end_date?: string | null;
   recurrence_group_id?: string | null;
+  tithe_percentage?: number | null;
+  tithe_amount?: number | null;
   created_at: string;
   updated_at: string;
   profile?: Profile;
 }
+
 
 export interface ExpenseItem {
   id: string;
