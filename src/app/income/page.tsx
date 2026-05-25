@@ -155,13 +155,15 @@ export default function IncomePage() {
       // 2. 自動扣 10% 到 honor_lake
       if (titheAmount > 0) {
         // 確保 honor_lake 存在
-        const { data: hl } = await supabase.from('honor_lake').select('current_balance').eq('family_id', profile.family_id).maybeSingle();
-        const { data: hl2 } = hl
-          ? { data: hl }
-          : await supabase.from('honor_lake').insert({ family_id: profile.family_id, current_balance: 0 }).select('current_balance').single();
+        let hlRecord = await supabase.from('honor_lake').select('current_balance').eq('family_id', profile.family_id).maybeSingle();
+        let hl = hlRecord.data;
+        if (!hl) {
+          const { data: newHl } = await supabase.from('honor_lake').insert({ family_id: profile.family_id, current_balance: 0 }).select('current_balance').single();
+          hl = newHl;
+        }
 
-        if (hl2) {
-          await supabase.from('honor_lake').update({ current_balance: (hl2.current_balance ?? 0) + titheAmount }).eq('family_id', profile.family_id);
+        if (hl) {
+          await supabase.from('honor_lake').update({ current_balance: (hl.current_balance ?? 0) + titheAmount }).eq('family_id', profile.family_id);
         }
 
         await supabase.from('transactions').insert({
