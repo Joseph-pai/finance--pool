@@ -174,7 +174,6 @@ export default function RequestsPage() {
     setSaving(true);
 
     if (batchAction === 'approve') {
-      const today = format(new Date(), 'yyyy-MM-dd');
       const now = new Date().toISOString();
       const { data: batchData } = await supabase
         .from('lake_requests')
@@ -189,7 +188,7 @@ export default function RequestsPage() {
         await supabase.from('lake_requests').update({
           status: 'approved',
           approved_amount: approvedAmt,
-          approved_date: today,
+          approved_date: item.requested_date,
           reviewed_at: now,
         }).eq('id', item.id);
 
@@ -198,10 +197,11 @@ export default function RequestsPage() {
           family_id: profile.family_id,
           type: 'request_approved',
           title: '湖泊調撥申請已批准（批量）',
-          message: `您申請的「${item.item_name}」已批量批准，金額 ${formatTWD(approvedAmt)}，預計 ${today} 到帳`,
+          message: `您申請的「${item.item_name}」已批量批准，金額 ${formatTWD(approvedAmt)}，預計 ${item.requested_date} 到帳`,
           reference_id: item.id,
         });
       }
+
     } else if (batchAction === 'reject') {
       const now = new Date().toISOString();
       const { data: batchData } = await supabase
