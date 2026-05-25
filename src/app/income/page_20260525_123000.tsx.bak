@@ -1,0 +1,591 @@
+'use client';
+
+import { useEffect, useState, useCallback } from 'react';
+import { useAuth } from '@/hooks/useAuth';
+import { createClient } from '@/lib/supabase';
+import { IncomeItem, Profile, Transaction } from '@/types';
+import { formatTWD } from '@/lib/predictions';
+import { format, isAfter, parseISO } from 'date-fns';
+import { zhTW } from 'date-fns/locale';
+import { LabelTooltip } from '@/components/ui/Tooltip';
+
+type ModalMode = 'add' | 'edit' | 'confirm' | null;
+
+function calculateUserPondABalance(items: (IncomeItem & { profile?: Profile })[], transactions: Transaction[], userId: string): number {
+  const confirmedPondAIncome = items
+    .filter(item => item.user_id === userId && item.status === 'confirmed' && item.destination === 'pond_a')
+    .reduce((sum, item) => sum + (item.actual_amount ?? item.amount), 0);
+
+  const transferFromPondB = transactions
+    .filter(transaction => (transaction.user_id ?? '') === userId && transaction.destination === 'pond_a' && transaction.type === 'transfer_from_pond_b')
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+
+  const outboundTransfers = transactions
+    .filter(transaction => (transaction.user_id ?? '') === userId && transaction.source === 'pond_a' && ['transfer_to_lake', 'transfer_to_pond_b'].includes(transaction.type))
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+
+  return Math.max(0, confirmedPondAIncome + transferFromPondB - outboundTransfers);
+}
+
+function calculatePendingLakeAmount(items: (IncomeItem & { profile?: Profile })[], userId: string): number {
+  return items
+    .filter(item => item.user_id === userId && item.status === 'pending' && item.destination === 'lake')
+    .reduce((sum, item) => sum + item.amount, 0);
+}
+
+export default function IncomePage() {
+  const { profile, isAdmin, canManageLake } = useAuth();
+  const supabase = createClient();
+
+  const [items, setItems]         = useState<(IncomeItem & { profile?: Profile })[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [modal, setModal]         = useState<ModalMode>(null);
+  const [selected, setSelected]   = useState<IncomeItem | null>(null);
+  const [saving, setSaving]       = useState(false);
+  const [filterUser, setFilterUser] = useState<string>('all');
+  const [members, setMembers]     = useState<Profile[]>([]);
+  
+  // 刪除確認相關
+  const [deleteTarget, setDeleteTarget] = useState<IncomeItem | null>(null);
+  const [showDeleteOptions, setShowDeleteOptions] = useState(false);
+
+  // 編輯循環選項相關
+  const [showEditOptions, setShowEditOptions] = useState(false);
+
+  // Form state
+  const [form, setForm] = useState({
+    name: '',
+    expected_date: '',
+    amount: '',
+    user_id: '',
+    destination: 'pond_a' as 'pond_a' | 'lake',
+    is_recurring: false,
+    recurrence_rule: 'monthly' as 'monthly' | 'quarterly' | 'yearly',
+    recurrence_end_date: '',
+  });
+  const [transferAmount, setTransferAmount] = useState('');
+  const [confirmActual, setConfirmActual] = useState('');
+  const [activeItemId, setActiveItemId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!profile?.family_id || !profile?.id) return;
+    setLoading(true);
+    const [incRes, profRes, txRes] = await Promise.all([
+      supabase.from('income_items').select('*, profile:profiles(*)').eq('family_id', profile.family_id).order('expected_date', { ascending: true }),
+      supabase.from('profiles').select('*').eq('family_id', profile.family_id),
+      supabase.from('transactions').select('*').eq('family_id', profile.family_id),
+    ]);
+    setItems((incRes.data ?? []) as (IncomeItem & { profile?: Profile })[]);
+    setMembers((profRes.data ?? []) as Profile[]);
+    setTransactions((txRes.data ?? []) as Transaction[]);
+    setLoading(false);
+  }, [profile?.family_id, profile?.id, supabase]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const openAdd = () => {
+    setForm({
+      name: '',
+      expected_date: format(new Date(), 'yyyy-MM-dd'),
+      amount: '',
+      user_id: profile?.id || '',
+      destination: 'pond_a',
+      is_recurring: false,
+      recurrence_rule: 'monthly',
+      recurrence_end_date: format(new Date(), 'yyyy-MM-dd'),
+    });
+    setModal('add');
+    setSelected(null);
+  };
+
+  const openEdit = (item: IncomeItem) => {
+    setForm({
+      name: item.name,
+      expected_date: item.expected_date,
+      amount: String(item.amount),
+      user_id: item.user_id,
+      destination: item.destination ?? 'pond_a',
+      is_recurring: item.is_recurring ?? false,
+      recurrence_rule: item.recurrence_rule ?? 'monthly',
+      recurrence_end_date: item.recurrence_end_date ?? item.expected_date,
+    });
+    setSelected(item);
+    setModal('edit');
+  };
+
+  const openConfirm = (item: IncomeItem) => {
+    setSelected(item);
+    setConfirmActual(String(item.amount));
+    setModal('confirm');
+  };
+
+  const closeModal = () => {
+    setModal(null);
+    setSelected(null);
+    setShowEditOptions(false);
+    setSaving(false);
+  };
+
+  const handleSave = async (editType?: 'single' | 'future') => {
+    if (!profile?.family_id) return;
+    setSaving(true);
+    const targetUserId = form.user_id || profile.id;
+    const amountNum = Number(form.amount);
+
+    if (modal === 'add') {
+      if (form.is_recurring) {
+        const recurrence_group_id = crypto.randomUUID();
+        const occurrences: any[] = [];
+        let current = new Date(form.expected_date + 'T00:00:00');
+        const endLimit = new Date(form.recurrence_end_date + 'T23:59:59');
+        while (current <= endLimit) {
+          const expectedStr = format(current, 'yyyy-MM-dd');
+          occurrences.push({
+            name: form.name,
+            expected_date: expectedStr,
+            amount: amountNum,
+            family_id: profile.family_id,
+            user_id: targetUserId,
+            destination: form.destination,
+            is_recurring: true,
+            recurrence_rule: form.recurrence_rule,
+            recurrence_start_date: form.expected_date,
+            recurrence_end_date: form.recurrence_end_date,
+            recurrence_group_id,
+            status: 'pending',
+          });
+
+          if (form.recurrence_rule === 'monthly') {
+            current.setMonth(current.getMonth() + 1);
+          } else if (form.recurrence_rule === 'quarterly') {
+            current.setMonth(current.getMonth() + 3);
+          } else if (form.recurrence_rule === 'yearly') {
+            current.setFullYear(current.getFullYear() + 1);
+          } else {
+            break;
+          }
+        }
+        if (occurrences.length > 0) {
+          await supabase.from('income_items').insert(occurrences);
+        }
+      } else {
+        await supabase.from('income_items').insert({
+          name: form.name,
+          expected_date: form.expected_date,
+          amount: amountNum,
+          family_id: profile.family_id,
+          user_id: targetUserId,
+          destination: form.destination,
+          is_recurring: false,
+          status: 'pending',
+        });
+      }
+      closeModal();
+      load();
+    } else if (modal === 'edit' && selected) {
+      if (selected.is_recurring && !editType) {
+        setShowEditOptions(true);
+        setSaving(false);
+        return;
+      }
+
+      const updatePayload: any = {
+        name: form.name,
+        amount: amountNum,
+        destination: form.destination,
+        user_id: targetUserId,
+      };
+
+      const singleUpdate = {
+        ...updatePayload,
+        expected_date: form.expected_date,
+      };
+
+      if (selected.status === 'confirmed') {
+        singleUpdate.actual_amount = amountNum;
+      }
+
+      if (selected.is_recurring && editType === 'future') {
+        await supabase
+          .from('income_items')
+          .update(updatePayload)
+          .eq('recurrence_group_id', selected.recurrence_group_id)
+          .gte('expected_date', selected.expected_date);
+
+        if (selected.status === 'confirmed') {
+          await supabase
+            .from('income_items')
+            .update({ actual_amount: amountNum })
+            .eq('recurrence_group_id', selected.recurrence_group_id)
+            .gte('expected_date', selected.expected_date)
+            .eq('status', 'confirmed');
+        }
+      } else {
+        await supabase
+          .from('income_items')
+          .update(singleUpdate)
+          .eq('id', selected.id);
+      }
+      setShowEditOptions(false);
+      closeModal();
+      load();
+    }
+  };
+
+  const handleConfirmIncome = async (confirmed: boolean) => {
+    if (!selected || !profile) return;
+    setSaving(true);
+    const actualAmount = Number(confirmActual);
+
+    if (confirmed) {
+      await supabase.from('income_items').update({
+        status: 'confirmed',
+        actual_amount: actualAmount,
+        confirmed_at: new Date().toISOString(),
+      }).eq('id', selected.id);
+    } else {
+      await supabase.from('income_items').update({ status: 'failed' }).eq('id', selected.id);
+    }
+
+    closeModal();
+    load();
+  };
+
+  const handleTransferToLake = async (item: IncomeItem) => {
+    if (!profile) return;
+
+    if (item.status === 'pending' && item.destination !== 'lake') {
+      setSaving(true);
+      try {
+        const { error } = await supabase
+          .from('income_items')
+          .update({ destination: 'lake' })
+          .eq('id', item.id);
+        if (error) throw new Error(error.message);
+      } catch (err: any) {
+        alert('系統錯誤：' + err.message);
+        console.error('加入湖泊預計收入失敗：', err);
+      } finally {
+        setSaving(false);
+        load();
+      }
+      return;
+    }
+
+    const pondABalance = calculateUserPondABalance(items, transactions, item.user_id);
+    const amt = Number(transferAmount);
+    if (!amt) return;
+    if (amt > pondABalance) {
+      alert(`注入金額（${formatTWD(amt)}）不能超過收入池餘額（${formatTWD(pondABalance)}）`);
+      return;
+    }
+    setSaving(true);
+
+    try {
+      const { error } = await supabase.from('transactions').insert({
+        family_id: profile.family_id,
+        user_id: item.user_id,
+        reference_id: item.id,
+        type: 'transfer_to_lake',
+        amount: amt,
+        source: 'pond_a',
+        destination: 'lake',
+        note: `注入湖泊：${item.name}`,
+        transaction_date: new Date().toISOString().substring(0, 10),
+      });
+      if (error) throw new Error(error.message);
+    } catch (err: any) {
+      alert('系統錯誤：' + err.message);
+      console.error('注入湖泊失敗：', err);
+    }
+
+    setTransferAmount('');
+    setSaving(false);
+    load();
+  };
+
+  const handleTransferToPondBFromIncome = async (item: IncomeItem) => {
+    const pondABalance = calculateUserPondABalance(items, transactions, item.user_id);
+    const amt = Number(transferAmount);
+    if (!amt || !profile) return;
+    if (amt > pondABalance) {
+      alert(`注入金額（${formatTWD(amt)}）不能超過收入池餘額（${formatTWD(pondABalance)}）`);
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('transactions').insert({
+        family_id: profile.family_id,
+        user_id: item.user_id,
+        reference_id: item.id,
+        type: 'transfer_to_pond_b',
+        amount: amt,
+        source: 'pond_a',
+        destination: 'pond_b',
+        note: `注入支出池：${item.name}`,
+        transaction_date: new Date().toISOString().substring(0, 10),
+      });
+      if (error) throw new Error(error.message);
+    } catch (err: any) {
+      alert('系統錯誤：' + err.message);
+      console.error('注入支出池失敗：', err);
+    }
+    setTransferAmount('');
+    setActiveItemId(null);
+    setSaving(false);
+    load();
+  };
+
+  /** 刪除確認 */
+  const confirmDelete = (item: IncomeItem) => {
+    setDeleteTarget(item);
+    setShowDeleteOptions(item.is_recurring ?? false);
+  };
+
+  const handleDelete = async (deleteType?: 'single' | 'future') => {
+    if (!deleteTarget) return;
+
+    if (deleteTarget.is_recurring && deleteType === 'future') {
+      const { error } = await supabase
+        .from('income_items')
+        .delete()
+        .eq('recurrence_group_id', deleteTarget.recurrence_group_id)
+        .gte('expected_date', deleteTarget.expected_date);
+      if (error) {
+        console.error('Failed to delete recurring income (future):', error);
+        alert('刪除失敗：' + error.message);
+      }
+    } else {
+      const { error } = await supabase.from('income_items').delete().eq('id', deleteTarget.id);
+      if (error) {
+        console.error('Failed to delete income:', error);
+        alert('刪除失敗：' + error.message);
+      }
+    }
+
+    setDeleteTarget(null);
+    setShowDeleteOptions(false);
+    load();
+  };
+
+  const filtered = items.filter(i => filterUser === 'all' || i.user_id === filterUser);
+  const myItems = items.filter(i => i.user_id === profile?.id);
+  const totalPending = myItems.filter(i => i.status === 'pending').reduce((s, i) => s + i.amount, 0);
+  const totalConfirmed = myItems.filter(i => i.status === 'confirmed').reduce((s, i) => s + (i.actual_amount ?? i.amount), 0);
+
+  const statusLabel: Record<string, { text: string; badge: string }> = {
+    pending:   { text: '待確認', badge: 'badge-warning' },
+    confirmed: { text: '已到帳', badge: 'badge-success' },
+    failed:    { text: '未到帳', badge: 'badge-error' },
+  };
+
+  const recurringLabel: Record<string, string> = { monthly: '每月', quarterly: '每季', yearly: '每年' };
+
+  return (
+    <div className="page-container">
+      <div className="page-header">
+        <h1 className="page-title">💰 收入管理</h1>
+        <p className="page-subtitle">池塘A — 記錄並確認您的收入</p>
+      </div>
+
+      {/* Summary Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-8)' }}>
+        <div className="card card-sm" style={{ borderColor: 'rgba(26,158,92,0.3)' }}>
+          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>待入帳合計</p>
+          <p className="amount-display amount-medium amount-pond-a">{formatTWD(totalPending)}</p>
+        </div>
+        <div className="card card-sm" style={{ borderColor: 'rgba(99,179,237,0.3)' }}>
+          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>已確認合計</p>
+          <p className="amount-display amount-medium" style={{ color: 'var(--status-info)' }}>{formatTWD(totalConfirmed)}</p>
+        </div>
+        <div className="card card-sm" style={{ borderColor: 'rgba(26,111,181,0.4)', background: 'rgba(26,111,181,0.06)' }}>
+          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>池塘A 剩餘餘額</p>
+          <p className="amount-display amount-medium" style={{ color: 'var(--text-accent)' }}>{formatTWD(calculateUserPondABalance(items, transactions, profile?.id ?? ''))}</p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 2 }}>（已確認 - 已轉出）</p>
+        </div>
+        <div className="card card-sm">
+          <p className="text-xs text-muted" style={{ marginBottom: 4 }}>收入筆數</p>
+          <p className="amount-display amount-medium">{myItems.length}</p>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="flex items-center justify-between flex-wrap gap-4" style={{ marginBottom: 'var(--space-6)' }}>
+        <div className="flex gap-3">
+          <select className="form-input form-select" style={{ width: 'auto' }} value={filterUser} onChange={e => setFilterUser(e.target.value)} id="income-filter-user">
+            <option value="all">所有成員</option>
+            {members.map(m => <option key={m.id} value={m.id}>{m.display_name}</option>)}
+          </select>
+        </div>
+        <button className="btn btn-success" onClick={openAdd} id="income-add-btn">
+          + 新增收入
+        </button>
+      </div>
+
+      {/* Income List */}
+      {loading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          {[1,2,3].map(i => <div key={i} className="skeleton" style={{ height: 60, borderRadius: 'var(--radius-md)' }} />)}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="empty-state">
+          <span className="empty-state-icon">💰</span>
+          <p className="empty-state-title">尚無收入記錄</p>
+          <p className="empty-state-desc">點擊「新增收入」來記錄您的預期收入</p>
+          <button className="btn btn-success" onClick={openAdd}>+ 新增收入</button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          {filtered.map((item) => {
+            const isOverdue = item.status === 'pending' && isAfter(new Date(), parseISO(item.expected_date));
+            const isMe = item.user_id === profile?.id;
+            const isHistory = item.status === 'confirmed' || item.status === 'failed';
+            const canEdit = isAdmin || (!isHistory && (isMe || canManageLake));
+            const canDelete = isAdmin || (!isHistory && (isMe || canManageLake));
+            const sl = statusLabel[item.status];
+            const userPondABalance = calculateUserPondABalance(items, transactions, item.user_id);
+            const pendingLakeAmount = calculatePendingLakeAmount(items, item.user_id);
+
+            return (
+              <div key={item.id} className="card card-sm" style={{ borderColor: isOverdue ? 'rgba(224,82,82,0.3)' : undefined }}>
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div className="flex gap-3 items-start" style={{ flex: 1 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg,var(--pond-a),var(--pond-a-light))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem', color: 'white', fontWeight: 700, flexShrink: 0 }}>
+                      {(item as IncomeItem & { profile?: Profile }).profile?.display_name?.[0] ?? '?'}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold">{item.name}</span>
+                        <span className={`badge ${sl.badge}`}>{sl.text}</span>
+                        {isOverdue && <span className="badge badge-error">逾期</span>}
+                        {item.is_recurring && (
+                          <span className="badge badge-info" style={{ gap: 4, display: 'flex', alignItems: 'center' }}>
+                            🔄 循環 ({recurringLabel[item.recurrence_rule ?? 'monthly']})
+                          </span>
+                        )}
+                        <span className="badge badge-ghost text-xs">
+                          🎯 {item.destination === 'lake' ? '🌊 家庭湖泊' : '💰 個人池塘A'}
+                        </span>
+                      </div>
+                      <div className="text-xs text-secondary" style={{ marginTop: 4 }}>
+                        成員：{(item as IncomeItem & { profile?: Profile }).profile?.display_name}
+                        · 預計到帳：{format(parseISO(item.expected_date), 'yyyy/MM/dd', { locale: zhTW })}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <span className="amount-display amount-small amount-pond-a">{formatTWD(item.amount)}</span>
+
+                    {canEdit && (
+                      <>
+                        {item.status === 'pending' && (
+                          <button className="btn btn-success btn-sm" onClick={() => openConfirm(item)} id={`income-confirm-${item.id}`}>
+                            確認到帳
+                          </button>
+                        )}
+                        {item.status === 'confirmed' && item.destination !== 'lake' && isMe && (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <div style={{ position: 'relative' }}>
+                              <input
+                                type="number"
+                                className="form-input"
+                                style={{ width: 90, padding: '4px 8px', fontSize: '0.85rem' }}
+                                placeholder="金額"
+                                title={`最多可轉出：${formatTWD(userPondABalance)}`}
+                                value={activeItemId === item.id ? transferAmount : ''}
+                                onFocus={() => {
+                                  setActiveItemId(item.id);
+                                  setTransferAmount('');
+                                }}
+                                onChange={e => setTransferAmount(e.target.value)}
+                                id={`income-transfer-input-${item.id}`}
+                              />
+                            </div>
+                            <span className="text-xs text-muted" style={{ fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
+                              可用 {formatTWD(userPondABalance)}
+                            </span>
+                            {pendingLakeAmount > 0 && (
+                              <span className="text-xs text-muted" style={{ whiteSpace: 'nowrap' }}>
+                                待入帳可匯入湖泊 {formatTWD(pendingLakeAmount)}
+                              </span>
+                            )}
+                            <button
+                              className="btn btn-primary btn-sm"
+                              onClick={() => { setActiveItemId(item.id); handleTransferToLake(item); }}
+                              disabled={saving || activeItemId !== item.id || !transferAmount}
+                              id={`income-transfer-lake-${item.id}`}
+                            >
+                              注入湖泊
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => { setActiveItemId(item.id); handleTransferToPondBFromIncome(item); }}
+                              disabled={saving || activeItemId !== item.id || !transferAmount}
+                              id={`income-transfer-pond-b-${item.id}`}
+                            >
+                              注入支出池
+                            </button>
+                          </div>
+                        )}
+                        {item.status === 'pending' && item.destination !== 'lake' && isMe && (
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => handleTransferToLake(item)}
+                            disabled={saving}
+                            id={`income-plan-to-lake-${item.id}`}
+                          >
+                            加入湖泊預計收入
+                          </button>
+                        )}
+                        {item.status === 'pending' && item.destination === 'lake' && isMe && (
+                          <span className="badge badge-success" style={{ whiteSpace: 'nowrap' }}>
+                            已加入湖泊預計收入
+                          </span>
+                        )}
+                        <button className="btn btn-ghost btn-sm" onClick={() => openEdit(item)} id={`income-edit-${item.id}`}>編輯</button>
+                      </>
+                    )}
+                    {canDelete && (
+                      <button className="btn btn-danger btn-sm" onClick={() => confirmDelete(item)} id={`income-delete-${item.id}`}>刪除</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {modal === 'confirm' && selected && (
+        <div className="modal-overlay" onClick={closeModal}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>確認到帳</h2>
+              <button className="modal-close" onClick={closeModal}>×</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-grid">
+                <div>
+                  <label>實際金額</label>
+                  <input
+                    type="number"
+                    value={confirmActual}
+                    onChange={e => setConfirmActual(e.target.value)}
+                    placeholder="請輸入實際金額"
+                    autoFocus
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={closeModal}>取消</button>
+              <button className="btn btn-success" onClick={() => handleConfirmIncome(true)} disabled={saving}>{saving ? '處理中...' : '確認到帳'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

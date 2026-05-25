@@ -120,7 +120,7 @@ export default function WaterWave({
           </span>
         )}
         {amount && (
-          <span className="amount-display amount-large" style={{ color: '#fff', textShadow: '0 2px 8px rgba(0,0,0,0.5)', fontSize: '1.8rem' }}>
+          <span className="amount-display amount-large" style={{ color: '#fff', textShadow: '0 2px 8px rgba(0,0,0,0.5)', fontSize: '2.8rem' }}>
             {amount}
           </span>
         )}
