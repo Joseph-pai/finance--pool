@@ -204,8 +204,10 @@ export default function DashboardPage() {
   const displayedLakeBalance = actualLakeBalance;
 
   const warningLevel = prediction?.warning_level ?? 'safe';
-  const lakeLevel         = calcWaterLevel(actualLakeBalance, maxBalance);
-  const estimatedLakeLevel = calcWaterLevel(estimatedLakeBalance, maxBalance);
+  // 湖泊水位使用湖泊專屬最大值（不與成員池塘混算）
+  const lakeMaxBalance   = Math.max(actualLakeBalance, estimatedLakeBalance, 1) * 1.3;
+  const lakeLevel         = calcWaterLevel(actualLakeBalance, lakeMaxBalance);
+  const estimatedLakeLevel = calcWaterLevel(estimatedLakeBalance, lakeMaxBalance);
 
   const warningColors: Record<string, string> = {
     safe:     'var(--status-success)',
