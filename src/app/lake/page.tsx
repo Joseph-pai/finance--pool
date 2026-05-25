@@ -306,6 +306,7 @@ export default function LakePage() {
                   amount={formatTWD(estimatedLakeBalance)}
                   warningLevel={prediction?.warning_level ?? 'safe'}
                 />
+                <div style={{ fontSize: 48, fontWeight: 900, color: 'var(--pond-a-light)', marginTop: 12, textAlign: 'center' }}>{formatTWD(estimatedLakeBalance)}</div>
                 <div className="text-xs text-secondary" style={{ marginTop: 6 }}>包含已確認與所有待入帳的預計收入</div>
               </div>
 
@@ -320,6 +321,7 @@ export default function LakePage() {
                   amount={formatTWD(currentLakeBalance)}
                   warningLevel={prediction?.warning_level ?? 'safe'}
                 />
+                <div style={{ fontSize: 48, fontWeight: 900, color: 'var(--lake-safe)', marginTop: 12, textAlign: 'center' }}>{formatTWD(currentLakeBalance)}</div>
                 <div className="text-xs text-secondary" style={{ marginTop: 6 }}>只包含已確認收入與已發生支出</div>
               </div>
             </div>
