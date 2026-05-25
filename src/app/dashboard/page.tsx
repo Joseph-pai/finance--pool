@@ -139,20 +139,6 @@ export default function DashboardPage() {
     setLoading(false);
   }, [profile?.family_id, supabase]);
 
-  // 動態監聽並計算乾涸預測
-  useEffect(() => {
-    if (lake) {
-      const pred = calculateLakeDryDate(
-        computedLakeBalance,
-        lakeExpenses,
-        lakeRequests,
-        allIncomes,
-        predMode
-      );
-      setPrediction(pred);
-    }
-  }, [lake, computedLakeBalance, lakeExpenses, lakeRequests, allIncomes, predMode]);
-
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
@@ -174,6 +160,24 @@ export default function DashboardPage() {
   const pendingLakeIncome = allIncomes
     .filter(i => i.destination === 'lake' && i.status === 'pending')
     .reduce((sum, i) => sum + i.amount, 0);
+
+  // 動態監聽並計算乾涸預測
+  useEffect(() => {
+    if (lake) {
+      // 預估模式下使用預估餘額作為起始金額
+      const balanceForPrediction = predMode === 'estimated'
+        ? computedLakeBalance + pendingLakeIncome
+        : computedLakeBalance;
+      const pred = calculateLakeDryDate(
+        balanceForPrediction,
+        lakeExpenses,
+        lakeRequests,
+        allIncomes,
+        predMode
+      );
+      setPrediction(pred);
+    }
+  }, [lake, computedLakeBalance, pendingLakeIncome, lakeExpenses, lakeRequests, allIncomes, predMode]);
 
   const actualLakeBalance = computedLakeBalance;
   const displayedLakeBalance = actualLakeBalance;

@@ -100,22 +100,6 @@ export default function LakePage() {
     setLoading(false);
   }, [profile?.family_id, supabase]);
 
-  // 動態監聽並計算乾涸預測
-  useEffect(() => {
-    if (lake) {
-      const pred = calculateLakeDryDate(
-        computedLakeBalance,
-        expenses.filter(e => e.status === 'active'),
-        lakeRequests,
-        incomes,
-        predMode
-      );
-      setPrediction(pred);
-      // 非同步更新資料庫中儲存的乾涸日期
-      supabase.from('lake').update({ dry_date: pred.dry_date ?? null }).eq('id', lake.id).then();
-    }
-  }, [lake, computedLakeBalance, expenses, lakeRequests, incomes, predMode, supabase]);
-
   useEffect(() => {
     if (profile && !canManageLake) router.replace('/dashboard');
     else load();
@@ -133,6 +117,30 @@ export default function LakePage() {
 
     return () => { supabase.removeChannel(channel); };
   }, [profile?.family_id, supabase, load]);
+
+  const pendingLakeIncome = incomes
+    .filter(i => i.destination === 'lake' && i.status === 'pending')
+    .reduce((sum, i) => sum + i.amount, 0);
+
+  // 動態監聽並計算乾涸預測
+  useEffect(() => {
+    if (lake) {
+      // 預估模式下使用預估餘額作為起始金額
+      const balanceForPrediction = predMode === 'estimated'
+        ? computedLakeBalance + pendingLakeIncome
+        : computedLakeBalance;
+      const pred = calculateLakeDryDate(
+        balanceForPrediction,
+        expenses.filter(e => e.status === 'active'),
+        lakeRequests,
+        incomes,
+        predMode
+      );
+      setPrediction(pred);
+      // 非同步更新資料庫中儲存的乾涸日期
+      supabase.from('lake').update({ dry_date: pred.dry_date ?? null }).eq('id', lake.id).then();
+    }
+  }, [lake, computedLakeBalance, pendingLakeIncome, expenses, lakeRequests, incomes, predMode, supabase]);
 
   const openAdd = () => {
     setForm({ name: '', expected_date: format(new Date(), 'yyyy-MM-dd'), amount: '', is_recurring: false, recurrence_rule: 'monthly' });
@@ -254,10 +262,6 @@ export default function LakePage() {
     danger: 'var(--lake-danger)',
     critical: 'var(--status-error)',
   }[prediction?.warning_level ?? 'safe'];
-
-  const pendingLakeIncome = incomes
-    .filter(i => i.destination === 'lake' && i.status === 'pending')
-    .reduce((sum, i) => sum + i.amount, 0);
 
   const currentLakeBalance = computedLakeBalance;
   const estimatedLakeBalance = computedLakeBalance + pendingLakeIncome;
