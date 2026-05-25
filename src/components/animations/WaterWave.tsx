@@ -112,15 +112,15 @@ export default function WaterWave({
         position: 'absolute', inset: 0,
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
-        gap: '4px', zIndex: 1,
+        gap: '4px', zIndex: 10, pointerEvents: 'none',
       }}>
         {label && (
-          <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'rgba(255,255,255,0.7)' }}>
+          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'rgba(255,255,255,0.85)', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
             {label}
           </span>
         )}
         {amount && (
-          <span className="amount-display amount-large" style={{ color: '#fff', textShadow: '0 2px 8px rgba(0,0,0,0.5)', fontSize: '2.8rem' }}>
+          <span style={{ fontFamily: "'Inter', sans-serif", fontWeight: 900, fontSize: '3rem', color: '#fff', textShadow: '0 2px 12px rgba(0,0,0,0.8)', letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>
             {amount}
           </span>
         )}
