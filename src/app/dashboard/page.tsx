@@ -253,41 +253,52 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Lake Section */}
+      {/* Lake Section — 兩個湖泊水位卡片 */}
       <section style={{ marginBottom: 'var(--space-8)' }}>
-        <div className="card" style={{ padding: 'var(--space-6)' }}>
-          <div style={{ display: 'flex', flexDirection: 'row', gap: '32px', justifyContent: 'center', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 'var(--space-5)' }}>
-            {/* 預估餘額湖泊（左） */}
-            <div style={{ minWidth: 280, maxWidth: 380, flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'rgba(60,120,180,0.10)', borderRadius: 18, boxShadow: '0 2px 16px 0 rgba(0,0,0,0.08)', padding: '24px 16px 20px 16px' }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--pond-a-light)', marginBottom: 8 }}>🌊 家庭湖泊（預估餘額）</div>
-              <WaterWave
-                level={estimatedLakeLevel}
-                variant="lake"
-                height={200}
-                label="預估餘額"
-                amount={formatTWD(estimatedLakeBalance)}
-                warningLevel={warningLevel}
-              />
-              <div style={{ fontSize: 48, fontWeight: 900, color: 'var(--pond-a-light)', marginTop: 12, textAlign: 'center' }}>{formatTWD(estimatedLakeBalance)}</div>
-              <div className="text-xs text-secondary" style={{ marginTop: 6 }}>含待入帳收入、已批准申請及啟用中支出</div>
-            </div>
-
-            {/* 當前餘額湖泊（右） */}
-            <div style={{ minWidth: 280, maxWidth: 380, flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'rgba(30,60,120,0.13)', borderRadius: 18, boxShadow: '0 2px 16px 0 rgba(0,0,0,0.08)', padding: '24px 16px 20px 16px' }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--lake-safe)', marginBottom: 8 }}>🌊 家庭湖泊（當前餘額）</div>
-              <WaterWave
-                level={lakeLevel}
-                variant="lake"
-                height={200}
-                label="當前餘額"
-                amount={formatTWD(actualLakeBalance)}
-                warningLevel={warningLevel}
-              />
-              <div style={{ fontSize: 48, fontWeight: 900, color: 'var(--lake-safe)', marginTop: 12, textAlign: 'center' }}>{formatTWD(actualLakeBalance)}</div>
-              <div className="text-xs text-secondary" style={{ marginTop: 6 }}>只包含已確認收入與已發生支出</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 'var(--space-6)', marginBottom: 'var(--space-6)' }}>
+          {/* 預估餘額湖泊 */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(60,120,180,0.3)' }}>
+            <WaterWave
+              level={estimatedLakeLevel}
+              variant="lake"
+              height={200}
+              label="🌊 家庭湖泊（預估餘額）"
+              amount={formatTWD(estimatedLakeBalance)}
+              warningLevel={warningLevel}
+            />
+            <div style={{ padding: 'var(--space-5)' }}>
+              <div style={{ fontSize: 40, fontWeight: 900, color: 'var(--pond-a-light)', textAlign: 'center', marginBottom: 'var(--space-2)' }}>
+                {formatTWD(estimatedLakeBalance)}
+              </div>
+              <div style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                含待入帳收入、已批准申請及啟用中支出
+              </div>
             </div>
           </div>
 
+          {/* 當前餘額湖泊 */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden', borderColor: 'rgba(30,60,120,0.3)' }}>
+            <WaterWave
+              level={lakeLevel}
+              variant="lake"
+              height={200}
+              label="🌊 家庭湖泊（當前餘額）"
+              amount={formatTWD(actualLakeBalance)}
+              warningLevel={warningLevel}
+            />
+            <div style={{ padding: 'var(--space-5)' }}>
+              <div style={{ fontSize: 40, fontWeight: 900, color: 'var(--lake-safe)', textAlign: 'center', marginBottom: 'var(--space-2)' }}>
+                {formatTWD(actualLakeBalance)}
+              </div>
+              <div style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                只包含已確認收入與已發生支出
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 預測摘要與管理按鈕 */}
+        <div className="card" style={{ padding: 'var(--space-5)' }}>
           <div className="flex items-center justify-between flex-wrap gap-4">
             {/* Prediction */}
             <div>
