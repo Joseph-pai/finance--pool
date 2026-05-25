@@ -176,12 +176,13 @@ export function calcWaterLevel(balance: number, maxBalance: number): number {
 
 /**
  * 計算從今天到截止日期間，湖泊的資金缺口或充裕結餘
+ * 此分析總是包含 待入帳收入 + 啟用中支出(含循環) + 已批准申請，
+ * 不受預測模式影響，因為用戶選定了一個具體的截止日就是想知道完整狀況。
  * @param currentBalance 當前湖泊餘額
  * @param lakeExpenses 湖泊計劃支出列表
  * @param approvedRequests 已批准的成員調撥申請
  * @param incomeItems 所有收入項目
  * @param endDate 截止日期（用戶選擇）
- * @param mode 預估模式
  */
 export function calculateLakeBalanceToDate(
   currentBalance: number,
@@ -189,7 +190,6 @@ export function calculateLakeBalanceToDate(
   approvedRequests: LakeRequest[],
   incomeItems: IncomeItem[],
   endDate: Date,
-  mode: 'current' | 'estimated' = 'current',
 ): BalanceToDateResult {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -242,22 +242,20 @@ export function calculateLakeBalanceToDate(
       }
     });
 
-  // 3. 預計收入 (Inflows)
-  if (mode === 'estimated') {
-    incomeItems
-      .filter(inc => inc.status === 'pending' && inc.destination === 'lake' && inc.amount > 0)
-      .forEach(inc => {
-        const d = inc.expected_date;
-        if (d >= todayStr && d <= endStr) {
-          events.push({
-            date: d,
-            name: `預計收入：${inc.name}`,
-            amount: inc.amount,
-            type: 'inflow',
-          });
-        }
-      });
-  }
+  // 3. 預計收入 (Inflows) — 永遠包含待入帳收入，不受預測模式影響
+  incomeItems
+    .filter(inc => inc.status === 'pending' && inc.destination === 'lake' && inc.amount > 0)
+    .forEach(inc => {
+      const d = inc.expected_date;
+      if (d >= todayStr && d <= endStr) {
+        events.push({
+          date: d,
+          name: `預計收入：${inc.name}`,
+          amount: inc.amount,
+          type: 'inflow',
+        });
+      }
+    });
 
   // 按日期排序
   events.sort((a, b) => a.date.localeCompare(b.date));

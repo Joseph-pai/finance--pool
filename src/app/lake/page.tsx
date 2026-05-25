@@ -166,10 +166,9 @@ export default function LakePage() {
       lakeRequests,
       incomes,
       parseISO(predEndDate),
-      predMode,
     );
     setBalanceToDate(result);
-  }, [predEndDate, computedLakeBalance, expenses, lakeRequests, incomes, predMode]);
+  }, [predEndDate, computedLakeBalance, expenses, lakeRequests, incomes]);
 
 
   const openAdd = () => {
