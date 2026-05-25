@@ -12,25 +12,22 @@ import { LabelTooltip } from '@/components/ui/Tooltip';
 type ModalMode = 'add' | 'edit' | 'confirm' | null;
 
 function calculateUserPondABalance(items: (IncomeItem & { profile?: Profile })[], transactions: Transaction[], userId: string): number {
-  // 已確認的 Pond A 收入總額（含什一攤提及 honor_contribution 已扣款）
+  // 已確認的 Pond A 收入總額（DB trigger 會自動將全額加入 pond_a）
   const confirmedPondAIncome = items
     .filter(item => item.user_id === userId && item.status === 'confirmed' && item.destination === 'pond_a')
     .reduce((sum, item) => sum + (item.actual_amount ?? item.amount), 0);
 
-  // 扣除其中的什一奉獻（因為實際只入帳淨額）
-  const titheFromIncome = items
-    .filter(item => item.user_id === userId && item.status === 'confirmed' && item.destination === 'pond_a')
-    .reduce((sum, item) => sum + Math.round((item.actual_amount ?? item.amount) * 10) / 100, 0);
+  // 從 pond_a 扣除的 transaction（如 honor_contribution、transfer_to_lake、transfer_to_pond_b）
+  const deductions = transactions
+    .filter(tx => (tx.user_id ?? '') === userId && tx.source === 'pond_a')
+    .reduce((sum, tx) => sum + tx.amount, 0);
 
-  const transferFromPondB = transactions
-    .filter(transaction => (transaction.user_id ?? '') === userId && transaction.destination === 'pond_a' && transaction.type === 'transfer_from_pond_b')
-    .reduce((sum, transaction) => sum + transaction.amount, 0);
+  // 從 pond_b 轉入 pond_a
+  const additions = transactions
+    .filter(tx => (tx.user_id ?? '') === userId && tx.destination === 'pond_a' && tx.type === 'transfer_from_pond_b')
+    .reduce((sum, tx) => sum + tx.amount, 0);
 
-  const outboundTransfers = transactions
-    .filter(transaction => (transaction.user_id ?? '') === userId && transaction.source === 'pond_a' && ['transfer_to_lake', 'transfer_to_pond_b'].includes(transaction.type))
-    .reduce((sum, transaction) => sum + transaction.amount, 0);
-
-  return Math.max(0, confirmedPondAIncome - titheFromIncome + transferFromPondB - outboundTransfers);
+  return Math.max(0, confirmedPondAIncome - deductions + additions);
 }
 
 function calculatePendingLakeAmount(items: (IncomeItem & { profile?: Profile })[], userId: string): number {
@@ -148,56 +145,14 @@ export default function IncomePage() {
 
     if (confirmed) {
       // 1. 更新收入狀態為已確認
+      //   → DB trigger (fn_sync_income_to_pond_a) 會自動將全額 actaulAmount 加入 pond_a
       await supabase.from('income_items').update({
         status: 'confirmed',
         actual_amount: actualAmount,
         confirmed_at: new Date().toISOString(),
       }).eq('id', selected.id);
 
-      // 2. 淨額進入目標帳戶（pond_a 或 lake）
-      const netAmount = actualAmount - titheAmount;
-
-      if (selected.destination === 'pond_a') {
-        // 取得或建立使用者 pond_a 記錄
-        const { data: pa } = await supabase.from('pond_a').select('current_balance').eq('user_id', selected.user_id).maybeSingle();
-        if (pa) {
-          await supabase.from('pond_a').update({ current_balance: pa.current_balance + netAmount }).eq('user_id', selected.user_id);
-        } else {
-          await supabase.from('pond_a').insert({
-            user_id: selected.user_id,
-            family_id: profile.family_id,
-            current_balance: netAmount,
-            water_level: 0,
-          });
-        }
-      } else {
-        // 目的地是 lake
-        const { data: lake } = await supabase.from('lake').select('current_balance').eq('family_id', profile.family_id).maybeSingle();
-        if (lake) {
-          await supabase.from('lake').update({ current_balance: lake.current_balance + netAmount }).eq('family_id', profile.family_id);
-        } else {
-          await supabase.from('lake').insert({
-            family_id: profile.family_id,
-            current_balance: netAmount,
-            water_level: 0,
-          });
-        }
-      }
-
-      // 3. 建立收入入帳 transaction（淨額）- 用 income 型別
-      await supabase.from('transactions').insert({
-        family_id: profile.family_id,
-        user_id: selected.user_id,
-        reference_id: selected.id,
-        type: 'income',
-        amount: netAmount,
-        source: null,
-        destination: selected.destination === 'lake' ? 'lake' : 'pond_a',
-        note: `收入確認：${selected.name}`,
-        transaction_date: new Date().toISOString().substring(0, 10),
-      });
-
-      // 4. 自動扣 10% 到 honor_lake
+      // 2. 自動扣 10% 到 honor_lake
       if (titheAmount > 0) {
         // 確保 honor_lake 存在
         const { data: hl } = await supabase.from('honor_lake').select('current_balance').eq('family_id', profile.family_id).maybeSingle();
@@ -220,6 +175,14 @@ export default function IncomePage() {
           note: `榮耀歸主奉獻（${selected.name}）`,
           transaction_date: new Date().toISOString().substring(0, 10),
         });
+
+        // 扣除 pond_a 的什一（trigger 已加全額，這裡手動扣回什一部分）
+        if (selected.destination === 'pond_a') {
+          const { data: pa } = await supabase.from('pond_a').select('current_balance').eq('user_id', selected.user_id).single();
+          if (pa) {
+            await supabase.from('pond_a').update({ current_balance: Math.max(0, pa.current_balance - titheAmount) }).eq('user_id', selected.user_id);
+          }
+        }
       }
     } else {
       await supabase.from('income_items').update({ status: 'failed' }).eq('id', selected.id);
