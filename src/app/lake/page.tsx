@@ -135,25 +135,22 @@ export default function LakePage() {
   // 預估餘額 = 當前餘額 + 待入帳收入 - 已批准申請 - 啟用中支出
   const estimatedLakeBalance = computedLakeBalance + pendingLakeIncome - approvedLakeRequests - activeLakeExpensesTotal;
 
-  // 動態監聽並計算乾涸預測
+  // 動態監聽並計算乾涸預測（起始餘額永遠使用當前餘額，避免雙重計算）
   useEffect(() => {
+    const pred = calculateLakeDryDate(
+      computedLakeBalance,
+      expenses.filter(e => e.status === 'active'),
+      lakeRequests,
+      incomes,
+      predMode
+    );
+    setPrediction(pred);
+    // 非同步更新資料庫中儲存的乾涸日期
     if (lake) {
-      // 預估模式下使用預估餘額作為起始金額
-      const balanceForPrediction = predMode === 'estimated'
-        ? estimatedLakeBalance
-        : computedLakeBalance;
-      const pred = calculateLakeDryDate(
-        balanceForPrediction,
-        expenses.filter(e => e.status === 'active'),
-        lakeRequests,
-        incomes,
-        predMode
-      );
-      setPrediction(pred);
-      // 非同步更新資料庫中儲存的乾涸日期
       supabase.from('lake').update({ dry_date: pred.dry_date ?? null }).eq('id', lake.id).then();
     }
-  }, [lake, computedLakeBalance, estimatedLakeBalance, expenses, lakeRequests, incomes, predMode, supabase]);
+  }, [computedLakeBalance, expenses, lakeRequests, incomes, predMode, supabase, lake]);
+
 
   const openAdd = () => {
     setForm({ name: '', expected_date: format(new Date(), 'yyyy-MM-dd'), amount: '', is_recurring: false, recurrence_rule: 'monthly' });

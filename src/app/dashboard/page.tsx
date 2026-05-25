@@ -174,20 +174,18 @@ export default function DashboardPage() {
   // 預估餘額 = 當前餘額 + 待入帳收入 - 已批准申請 - 啟用中支出
   const estimatedLakeBalance = computedLakeBalance + pendingLakeIncome - approvedLakeRequests - activeLakeExpensesTotal;
 
-  // 動態監聽並計算乾涸預測
+  // 動態監聽並計算乾涸預測（起始餘額永遠使用當前餘額，避免雙重計算）
   useEffect(() => {
-    const balanceForPrediction = predMode === 'estimated'
-      ? estimatedLakeBalance
-      : computedLakeBalance;
     const pred = calculateLakeDryDate(
-      balanceForPrediction,
+      computedLakeBalance,
       lakeExpenses,
       lakeRequests,
       allIncomes,
       predMode
     );
     setPrediction(pred);
-  }, [computedLakeBalance, estimatedLakeBalance, lakeExpenses, lakeRequests, allIncomes, predMode]);
+  }, [computedLakeBalance, lakeExpenses, lakeRequests, allIncomes, predMode]);
+
 
 
   const actualLakeBalance = computedLakeBalance;
