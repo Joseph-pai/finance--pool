@@ -37,14 +37,6 @@ function LoginPage() {
     setLoading(false);
   };
 
-  if (authLoading) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ width: 40, height: 40, border: '3px solid var(--color-border)', borderTopColor: 'var(--lake-safe)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-      </div>
-    );
-  }
-
   return (
     <main style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-6)' }}>
       <div style={{ width: '100%', maxWidth: 400 }}>
