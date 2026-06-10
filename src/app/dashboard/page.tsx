@@ -147,7 +147,10 @@ export default function DashboardPage() {
     const localActiveExpenses = expensesData
       .filter(e => e.status === 'active')
       .reduce((sum, e) => sum + e.amount, 0);
-    const estimatedLake = computedLakeBalance + localPendingLakeIncome - localApprovedRequests - localActiveExpenses;
+    const localEstimatedAdjustments = transactionsData
+      .filter(t => t.type === 'lake_estimated_adjustment')
+      .reduce((sum, t) => sum + (t.source === 'estimated_add' ? t.amount : -t.amount), 0);
+    const estimatedLake = computedLakeBalance + localPendingLakeIncome - localApprovedRequests - localActiveExpenses + localEstimatedAdjustments;
 
     // 計算最大參考水位：取所有池塘 A 的最大值和湖泊餘額（含預估）的最大值
     const maxA = Math.max(0, ...memberList.map(m => (m.pond_a?.current_balance ?? 0) + m.pendingIncomeTotal));
@@ -190,8 +193,13 @@ export default function DashboardPage() {
     .filter(e => e.status === 'active')
     .reduce((sum, e) => sum + e.amount, 0);
 
-  // 預估餘額 = 當前餘額 + 待入帳收入 - 已批准申請 - 啟用中支出
-  const estimatedLakeBalance = computedLakeBalance + pendingLakeIncome - approvedLakeRequests - activeLakeExpensesTotal;
+  // 預估餘額校正總和
+  const estimatedAdjustmentsTotal = lakeTransactions
+    .filter(t => t.type === 'lake_estimated_adjustment')
+    .reduce((sum, t) => sum + (t.source === 'estimated_add' ? t.amount : -t.amount), 0);
+
+  // 預估餘額 = 當前餘額 + 待入帳收入 - 已批准申請 - 啟用中支出 + 預估校正
+  const estimatedLakeBalance = computedLakeBalance + pendingLakeIncome - approvedLakeRequests - activeLakeExpensesTotal + estimatedAdjustmentsTotal;
 
   // 動態監聽並計算乾涸預測（起始餘額永遠使用當前餘額，避免雙重計算）
   useEffect(() => {

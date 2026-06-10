@@ -156,8 +156,13 @@ export default function LakePage() {
     .filter(e => e.status === 'active')
     .reduce((sum, e) => sum + e.amount, 0);
 
-  // 預估餘額 = 當前餘額 + 待入帳收入 - 已批准申請 - 啟用中支出
-  const estimatedLakeBalance = computedLakeBalance + pendingLakeIncome - approvedLakeRequests - activeLakeExpensesTotal;
+  // 預估餘額校正總和
+  const estimatedAdjustmentsTotal = lakeTransactions
+    .filter(t => t.type === 'lake_estimated_adjustment')
+    .reduce((sum, t) => sum + (t.source === 'estimated_add' ? t.amount : -t.amount), 0);
+
+  // 預估餘額 = 當前餘額 + 待入帳收入 - 已批准申請 - 啟用中支出 + 預估校正
+  const estimatedLakeBalance = computedLakeBalance + pendingLakeIncome - approvedLakeRequests - activeLakeExpensesTotal + estimatedAdjustmentsTotal;
 
   // 動態監聽並計算乾涸預測（永遠使用今天為起始日）
   useEffect(() => {
@@ -279,12 +284,17 @@ export default function LakePage() {
     setSaving(true);
 
     if (delta !== 0) {
+      const type = balanceType === 'current' ? 'lake_balance_adjustment' : 'lake_estimated_adjustment';
+      const source = balanceType === 'current' 
+        ? (delta > 0 ? 'adjustment_add' : 'adjustment_subtract')
+        : (delta > 0 ? 'estimated_add' : 'estimated_subtract');
+
       const { error } = await supabase.from('transactions').insert({
         family_id: profile.family_id,
         user_id: profile.id,
-        type: 'lake_balance_adjustment',
+        type,
         amount: Math.abs(delta),
-        source: delta > 0 ? 'adjustment_add' : 'adjustment_subtract',
+        source,
         destination: 'lake',
         note: `管理員調整${balanceType === 'current' ? '當前' : '預估'}餘額（${formatTWD(baseValue)} → ${formatTWD(targetValue)}，差額 ${delta > 0 ? '+' : ''}${formatTWD(delta)}）`,
         transaction_date: new Date().toISOString().substring(0, 10),
