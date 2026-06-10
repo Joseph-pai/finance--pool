@@ -172,7 +172,7 @@ export default function IncomePage() {
           reference_id: selected.id,
           type: 'honor_contribution',
           amount: titheAmount,
-          source: 'pond_a',
+          source: selected.destination === 'lake' ? 'lake' : 'pond_a',
           destination: 'honor_lake',
           note: `榮耀歸主奉獻（${selected.name}）`,
           transaction_date: new Date().toISOString().substring(0, 10),

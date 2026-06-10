@@ -112,6 +112,10 @@ export default function LakePage() {
       - txData
         .filter(t => t.type === 'lake_expense')
         .reduce((sum, t) => sum + t.amount, 0)
+      // 減去湖泊的什一奉獻
+      - txData
+        .filter(t => t.type === 'honor_contribution' && t.source === 'lake')
+        .reduce((sum, t) => sum + t.amount, 0)
       // 管理員餘額校正交易
       + txData
         .filter(t => t.type === 'lake_balance_adjustment' && t.source === 'adjustment_add')
