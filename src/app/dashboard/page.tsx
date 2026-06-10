@@ -96,6 +96,13 @@ export default function DashboardPage() {
       - transactionsData
         .filter(t => t.type === 'lake_expense')
         .reduce((sum, t) => sum + t.amount, 0)
+      // 管理員餘額校正交易
+      + transactionsData
+        .filter(t => t.type === 'lake_balance_adjustment' && t.source === 'adjustment_add')
+        .reduce((sum, t) => sum + t.amount, 0)
+      - transactionsData
+        .filter(t => t.type === 'lake_balance_adjustment' && t.source === 'adjustment_subtract')
+        .reduce((sum, t) => sum + t.amount, 0)
     );
 
     setComputedLakeBalance(computedLakeBalance);

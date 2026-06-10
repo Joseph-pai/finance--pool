@@ -15,6 +15,12 @@ import { LabelTooltip } from '@/components/ui/Tooltip';
 
 type ModalMode = 'add' | 'edit' | 'set-balance' | 'inject' | null;
 
+interface ConflictWarning {
+  approvedRequests: LakeRequest[];
+  injectedIncomes: IncomeItem[];
+  totalConflict: number;
+}
+
 export default function LakePage() {
   const { profile, canManageLake } = useAuth();
   const router = useRouter();
@@ -37,6 +43,10 @@ export default function LakePage() {
   const [saving, setSaving]         = useState(false);
   const [newBalance, setNewBalance] = useState('');
   const [members, setMembers]       = useState<Profile[]>([]);
+  // 調整餘額彈窗步驟（1=選類型, 2=輸入數值）
+  const [balanceStep, setBalanceStep]   = useState<1 | 2>(1);
+  const [balanceType, setBalanceType]   = useState<'current' | 'estimated'>('current');
+  const [conflictWarning, setConflictWarning] = useState<ConflictWarning | null>(null);
 
   const [injectForm, setInjectForm] = useState({
     user_id: '',
@@ -101,6 +111,13 @@ export default function LakePage() {
         .reduce((sum, t) => sum + t.amount, 0)
       - txData
         .filter(t => t.type === 'lake_expense')
+        .reduce((sum, t) => sum + t.amount, 0)
+      // 管理員餘額校正交易
+      + txData
+        .filter(t => t.type === 'lake_balance_adjustment' && t.source === 'adjustment_add')
+        .reduce((sum, t) => sum + t.amount, 0)
+      - txData
+        .filter(t => t.type === 'lake_balance_adjustment' && t.source === 'adjustment_subtract')
         .reduce((sum, t) => sum + t.amount, 0)
     );
     setComputedLakeBalance(computedLakeBalance);
@@ -226,13 +243,65 @@ export default function LakePage() {
     load();
   };
 
-  const handleSetBalance = async () => {
-    if (!lake || !newBalance) return;
+  // 衝突檢查：調整後餘額是否足夠支付已批准申請與已注入收入池
+  const checkConflicts = (targetValue: number, type: 'current' | 'estimated') => {
+    const baseValue = type === 'current' ? computedLakeBalance : estimatedLakeBalance;
+    const delta = targetValue - baseValue;
+    if (delta >= 0) {
+      setConflictWarning(null);
+      return;
+    }
+    // 已批准的調撥申請
+    const approvedReqs = lakeRequests.filter(r => r.status === 'approved');
+    const approvedTotal = approvedReqs.reduce(
+      (sum, r) => sum + (r.approved_amount ?? r.requested_amount), 0
+    );
+    // 已從湖泊注入收入池但尚未確認到帳（source='lake', status='pending'）
+    const injectedInc = incomes.filter(i => i.source === 'lake' && i.status === 'pending');
+    const injectedTotal = injectedInc.reduce((sum, i) => sum + i.amount, 0);
+    const totalConflict = approvedTotal + injectedTotal;
+    if (targetValue < totalConflict) {
+      setConflictWarning({ approvedRequests: approvedReqs, injectedIncomes: injectedInc, totalConflict });
+    } else {
+      setConflictWarning(null);
+    }
+  };
+
+  const handleSetBalance = async (forceConfirm = false) => {
+    if (!lake || !newBalance || !profile?.family_id) return;
+    const targetValue = Number(newBalance);
+    const baseValue = balanceType === 'current' ? computedLakeBalance : estimatedLakeBalance;
+    const delta = targetValue - baseValue;
+
+    // 若有衝突且未強制確認，不執行
+    if (conflictWarning && !forceConfirm) return;
+
     setSaving(true);
-    await supabase.from('lake').update({ current_balance: Number(newBalance) }).eq('id', lake.id);
+
+    if (delta !== 0) {
+      const { error } = await supabase.from('transactions').insert({
+        family_id: profile.family_id,
+        user_id: profile.id,
+        type: 'lake_balance_adjustment',
+        amount: Math.abs(delta),
+        source: delta > 0 ? 'adjustment_add' : 'adjustment_subtract',
+        destination: 'lake',
+        note: `管理員調整${balanceType === 'current' ? '當前' : '預估'}餘額（${formatTWD(baseValue)} → ${formatTWD(targetValue)}，差額 ${delta > 0 ? '+' : ''}${formatTWD(delta)}）`,
+        transaction_date: new Date().toISOString().substring(0, 10),
+      });
+      if (error) {
+        alert('更新失敗：' + error.message);
+        setSaving(false);
+        return;
+      }
+    }
+
     setSaving(false);
     setModal(null);
     setNewBalance('');
+    setBalanceStep(1);
+    setBalanceType('current');
+    setConflictWarning(null);
     load();
   };
 
@@ -493,7 +562,7 @@ export default function LakePage() {
                 <button className="btn btn-primary" onClick={() => setModal('inject')} id="lake-inject-member-btn">
                   調撥給成員
                 </button>
-                <button className="btn btn-ghost" onClick={() => { setNewBalance(String(currentLakeBalance)); setModal('set-balance'); }} id="lake-set-balance-btn">
+                <button className="btn btn-ghost" onClick={() => { setNewBalance(''); setBalanceStep(1); setBalanceType('current'); setConflictWarning(null); setModal('set-balance'); }} id="lake-set-balance-btn">
                   調整餘額
                 </button>
               </div>
@@ -656,38 +725,237 @@ export default function LakePage() {
         </div>
       )}
 
-      {/* Set Balance Modal */}
+      {/* Set Balance Modal — 兩步驟 */}
       {modal === 'set-balance' && (
-        <div className="modal-overlay" onClick={() => setModal(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => { setModal(null); setBalanceStep(1); setConflictWarning(null); }}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
             <div className="modal-header">
-              <h3 className="modal-title">調整湖泊餘額</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setModal(null)} id="lake-balance-close">✕</button>
+              <h3 className="modal-title">🎚️ 調整湖泊餘額</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setModal(null); setBalanceStep(1); setConflictWarning(null); }} id="lake-balance-close">✕</button>
             </div>
-            {/* ⚠️ 警告：直接調整會繞過交易記錄 */}
-            <div className="alert" style={{ background: 'rgba(245,166,35,0.1)', border: '1px solid rgba(245,166,35,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginBottom: 'var(--space-4)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-              <span style={{ fontSize: '1rem' }}>⚠️</span>
-              <div className="text-sm" style={{ color: 'var(--status-warning)' }}>
-                <strong>注意：</strong>直接調整餘額不會產生交易記錄，會導致餘額與歷史記錄不一致。<br />
-                <span style={{ opacity: 0.8 }}>建議改用「收入池→湖泊」轉帳功能，以保留完整稽核軌跡。</span>
+
+            {/* ── 步驟 1：選擇調整類型 ── */}
+            {balanceStep === 1 && (
+              <div>
+                <p className="text-secondary text-sm" style={{ marginBottom: 'var(--space-5)' }}>
+                  請選擇要調整的餘額類型：
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', marginBottom: 'var(--space-6)' }}>
+                  {/* 當前餘額選項 */}
+                  <label style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 14,
+                    padding: 'var(--space-4)',
+                    borderRadius: 'var(--radius-md)',
+                    border: `2px solid ${balanceType === 'current' ? 'var(--lake-safe)' : 'rgba(255,255,255,0.1)'}`,
+                    background: balanceType === 'current' ? 'rgba(34,200,112,0.07)' : 'rgba(255,255,255,0.03)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}>
+                    <input
+                      type="radio"
+                      name="balance-type"
+                      checked={balanceType === 'current'}
+                      onChange={() => setBalanceType('current')}
+                      style={{ width: 18, height: 18, marginTop: 2, flexShrink: 0 }}
+                    />
+                    <div>
+                      <div className="font-semibold" style={{ color: 'var(--lake-safe)', marginBottom: 4 }}>調整當前餘額</div>
+                      <div className="text-xs text-muted">只含已確認收入與已發生支出</div>
+                      <div className="font-bold" style={{ color: 'var(--lake-safe)', fontSize: '1.2rem', marginTop: 6 }}>
+                        {formatTWD(computedLakeBalance)}
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* 預估餘額選項 */}
+                  <label style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 14,
+                    padding: 'var(--space-4)',
+                    borderRadius: 'var(--radius-md)',
+                    border: `2px solid ${balanceType === 'estimated' ? 'var(--pond-a-light)' : 'rgba(255,255,255,0.1)'}`,
+                    background: balanceType === 'estimated' ? 'rgba(60,120,220,0.07)' : 'rgba(255,255,255,0.03)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}>
+                    <input
+                      type="radio"
+                      name="balance-type"
+                      checked={balanceType === 'estimated'}
+                      onChange={() => setBalanceType('estimated')}
+                      style={{ width: 18, height: 18, marginTop: 2, flexShrink: 0 }}
+                    />
+                    <div>
+                      <div className="font-semibold" style={{ color: 'var(--pond-a-light)', marginBottom: 4 }}>調整預估餘額</div>
+                      <div className="text-xs text-muted">含待入帳收入、已批准申請及啟用中支出</div>
+                      <div className="font-bold" style={{ color: 'var(--pond-a-light)', fontSize: '1.2rem', marginTop: 6 }}>
+                        {formatTWD(estimatedLakeBalance)}
+                      </div>
+                    </div>
+                  </label>
+                </div>
+                <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
+                  <button className="btn btn-ghost" onClick={() => setModal(null)} id="lake-balance-cancel-step1">取消</button>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => setBalanceStep(2)}
+                    id="lake-balance-next"
+                  >
+                    下一步 →
+                  </button>
+                </div>
               </div>
-            </div>
-            <p className="text-secondary text-sm" style={{ marginBottom: 'var(--space-4)' }}>
-              若需更正初始餘額或修復錯誤，可直接輸入目前實際餘額（台幣）。
-            </p>
-            <div className="form-group" style={{ marginBottom: 'var(--space-6)' }}>
-              <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
-                湖泊餘額
-                <LabelTooltip text="輸入現在湖泊的實際餘額（例如查看銀行存款後的正確數字）" />
-              </label>
-              <input id="lake-balance-input" type="number" className="form-input" placeholder="0" min="0" value={newBalance} onChange={e => setNewBalance(e.target.value)} />
-            </div>
-            <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
-              <button className="btn btn-ghost" onClick={() => setModal(null)} id="lake-balance-cancel">取消</button>
-              <button className="btn btn-primary" onClick={handleSetBalance} disabled={saving || !newBalance} id="lake-balance-save">
-                {saving ? '更新中...' : '確認更新'}
-              </button>
-            </div>
+            )}
+
+            {/* ── 步驟 2：輸入目標數值 ── */}
+            {balanceStep === 2 && (() => {
+              const baseValue = balanceType === 'current' ? computedLakeBalance : estimatedLakeBalance;
+              const targetValue = Number(newBalance) || 0;
+              const delta = newBalance ? targetValue - baseValue : null;
+              const isIncrease = delta !== null && delta > 0;
+              const isDecrease = delta !== null && delta < 0;
+              const noChange = delta === 0;
+              return (
+                <div>
+                  {/* 目前餘額提示 */}
+                  <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-md)', padding: 'var(--space-3) var(--space-4)', marginBottom: 'var(--space-4)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span className="text-sm text-muted">目前{balanceType === 'current' ? '當前' : '預估'}餘額</span>
+                    <span className="font-bold" style={{ color: balanceType === 'current' ? 'var(--lake-safe)' : 'var(--pond-a-light)', fontSize: '1.1rem' }}>
+                      {formatTWD(baseValue)}
+                    </span>
+                  </div>
+
+                  {/* 輸入框 */}
+                  <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
+                    <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+                      目標金額（台幣）
+                      <LabelTooltip text={`輸入您希望將${balanceType === 'current' ? '當前' : '預估'}餘額調整到的數值，可以增加或減少`} />
+                    </label>
+                    <input
+                      id="lake-balance-input"
+                      type="number"
+                      className="form-input"
+                      placeholder="輸入目標金額"
+                      min="0"
+                      value={newBalance}
+                      onChange={e => {
+                        setNewBalance(e.target.value);
+                        checkConflicts(Number(e.target.value), balanceType);
+                      }}
+                      autoFocus
+                    />
+                  </div>
+
+                  {/* 即時顯示差額 */}
+                  {delta !== null && !noChange && (
+                    <div style={{
+                      padding: 'var(--space-3) var(--space-4)',
+                      borderRadius: 'var(--radius-md)',
+                      marginBottom: 'var(--space-4)',
+                      background: isIncrease ? 'rgba(34,200,112,0.09)' : 'rgba(224,82,82,0.09)',
+                      border: `1px solid ${isIncrease ? 'rgba(34,200,112,0.25)' : 'rgba(224,82,82,0.25)'}`,
+                      display: 'flex', alignItems: 'center', gap: 10,
+                    }}>
+                      <span style={{ fontSize: '1.2rem' }}>{isIncrease ? '📈' : '📉'}</span>
+                      <div>
+                        <span className="text-sm">
+                          {isIncrease ? '增加 ' : '減少 '}
+                        </span>
+                        <span className="font-bold" style={{ color: isIncrease ? 'var(--status-success)' : 'var(--status-error)', fontSize: '1.05rem' }}>
+                          {isIncrease ? '+' : '-'}{formatTWD(Math.abs(delta))}
+                        </span>
+                        <span className="text-sm text-muted" style={{ marginLeft: 8 }}>
+                          {formatTWD(baseValue)} → {formatTWD(targetValue)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {delta !== null && noChange && (
+                    <div className="text-sm text-muted" style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-2) var(--space-3)' }}>
+                      ℹ️ 金額與目前相同，無需調整
+                    </div>
+                  )}
+
+                  {/* 衝突警告 */}
+                  {conflictWarning && (
+                    <div style={{
+                      marginBottom: 'var(--space-4)',
+                      padding: 'var(--space-4)',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'rgba(224,82,82,0.10)',
+                      border: '1px solid rgba(224,82,82,0.35)',
+                    }}>
+                      <div className="font-semibold text-sm" style={{ color: 'var(--status-error)', marginBottom: 'var(--space-3)' }}>
+                        ⚠️ 餘額不足警告
+                      </div>
+                      <div className="text-xs text-secondary" style={{ marginBottom: 'var(--space-3)' }}>
+                        調整後餘額（{formatTWD(targetValue)}）低於以下待付項目合計（{formatTWD(conflictWarning.totalConflict)}），建議先處理後再調整：
+                      </div>
+
+                      {conflictWarning.approvedRequests.length > 0 && (
+                        <div style={{ marginBottom: 'var(--space-3)' }}>
+                          <div className="text-xs font-semibold" style={{ color: 'var(--status-warning)', marginBottom: 4 }}>
+                            📋 已批准調撥申請（共 {formatTWD(conflictWarning.approvedRequests.reduce((s, r) => s + (r.approved_amount ?? r.requested_amount), 0))}）
+                          </div>
+                          {conflictWarning.approvedRequests.map(r => (
+                            <div key={r.id} className="text-xs" style={{ padding: '3px 8px', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                              <span style={{ color: 'var(--text-muted)' }}>{r.item_name}</span>
+                              <span style={{ color: 'var(--status-error)', fontWeight: 600 }}>{formatTWD(r.approved_amount ?? r.requested_amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {conflictWarning.injectedIncomes.length > 0 && (
+                        <div style={{ marginBottom: 'var(--space-3)' }}>
+                          <div className="text-xs font-semibold" style={{ color: 'var(--status-warning)', marginBottom: 4 }}>
+                            💸 已注入收入池待確認（共 {formatTWD(conflictWarning.injectedIncomes.reduce((s, i) => s + i.amount, 0))}）
+                          </div>
+                          {conflictWarning.injectedIncomes.map(i => (
+                            <div key={i.id} className="text-xs" style={{ padding: '3px 8px', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                              <span style={{ color: 'var(--text-muted)' }}>{i.name}</span>
+                              <span style={{ color: 'var(--status-error)', fontWeight: 600 }}>{formatTWD(i.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 'var(--space-2)' }}>
+                        建議先至「湖泊調撥申請」退回申請，或至「調撥給成員」取消待確認項目後再調整。
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 底部備註 */}
+                  <div className="text-xs text-muted" style={{ marginBottom: 'var(--space-5)', padding: 'var(--space-2) var(--space-3)', borderLeft: '2px solid rgba(255,255,255,0.1)' }}>
+                    ℹ️ 此調整不會自動扣除 10% 到榮耀歸於主湖泊（內部調控）
+                  </div>
+
+                  <div className="flex gap-3" style={{ justifyContent: 'flex-end' }}>
+                    <button className="btn btn-ghost" onClick={() => { setBalanceStep(1); setConflictWarning(null); }} id="lake-balance-back">← 上一步</button>
+                    <button className="btn btn-ghost" onClick={() => { setModal(null); setBalanceStep(1); setConflictWarning(null); }} id="lake-balance-cancel-step2">取消</button>
+                    {conflictWarning ? (
+                      <button
+                        className="btn btn-danger"
+                        onClick={() => handleSetBalance(true)}
+                        disabled={saving || !newBalance || noChange}
+                        id="lake-balance-force-save"
+                      >
+                        {saving ? '更新中...' : '⚠️ 強制確認'}
+                      </button>
+                    ) : (
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => handleSetBalance(false)}
+                        disabled={saving || !newBalance || noChange}
+                        id="lake-balance-save"
+                      >
+                        {saving ? '更新中...' : '✅ 確認更新'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

@@ -1,0 +1,10 @@
+- [x] 備份 3 個檔案
+- [x] 修改 `types/index.ts` — 新增 `lake_balance_adjustment` 類型、擴充 `NotificationSource`
+- [x] 修改 `dashboard/page.tsx` — 加入校正交易計算
+- [x] 修改 `lake/page.tsx`
+  - [x] 新增 State 變數（balanceType, balanceStep, conflictWarning）
+  - [x] 修改 computedLakeBalance 計算加入校正交易
+  - [x] 重寫 handleSetBalance 函式
+  - [x] 新增 checkConflicts 函式
+  - [x] 重寫 set-balance 彈窗 UI（兩步驟）
+- [x] TypeScript 編譯驗證（零錯誤）

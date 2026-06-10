@@ -6,11 +6,11 @@ export type IncomeStatus = 'pending' | 'confirmed' | 'failed';
 export type ExpenseSource = 'pond_a' | 'lake';
 export type ExpenseStatus = 'planned' | 'approved' | 'rejected' | 'completed';
 export type RequestStatus = 'pending' | 'approved' | 'rejected';
-export type TransactionType = 'income' | 'expense' | 'transfer_to_lake' | 'lake_expense' | 'lake_to_member' | 'transfer_to_pond_b' | 'transfer_from_pond_b' | 'honor_contribution' | 'honor_expense';
+export type TransactionType = 'income' | 'expense' | 'transfer_to_lake' | 'lake_expense' | 'lake_to_member' | 'transfer_to_pond_b' | 'transfer_from_pond_b' | 'honor_contribution' | 'honor_expense' | 'lake_balance_adjustment';
 
 export type RecurrenceRule = 'monthly' | 'quarterly' | 'yearly';
 export type LakeExpenseStatus = 'active' | 'paused' | 'completed';
-export type NotificationSource = 'lake' | 'pond_a' | 'pond_b' | 'honor_lake';
+export type NotificationSource = 'lake' | 'pond_a' | 'pond_b' | 'honor_lake' | 'adjustment_add' | 'adjustment_subtract';
 
 
 export interface Family {
