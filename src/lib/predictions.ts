@@ -105,6 +105,7 @@ export function calculateLakeDryDate(
   const scheduled: (DryPrediction['scheduled_outflows'][0] & { type?: 'inflow' | 'outflow' })[] = [];
   let dryDate: string | null = null;
   let deficitAtDryDate = 0; // 在乾涸日當天記錄短缺金額
+  let lastOutflowDate: string | null = null; // 追蹤上一筆支出日
 
   for (const event of futureEvents) {
     if (event.type === 'inflow') {
@@ -121,9 +122,15 @@ export function calculateLakeDryDate(
       type: event.type,
     } as any);
 
-    if (remaining <= 0 && !dryDate) {
-      dryDate = event.date;
-      deficitAtDryDate = Math.abs(remaining); // 記錄乾涸當下的短缺金額
+    if (remaining < 0 && !dryDate) {
+      // 乾涸日 = 付款後剩餘不足以支付下一筆支出的那天（即上一筆支出日）
+      dryDate = lastOutflowDate ?? event.date;
+      deficitAtDryDate = Math.abs(remaining); // 記錄短缺金額
+    }
+
+    // 記錄本筆支出日，供下次迭代判斷「上一筆支出」
+    if (event.type === 'outflow') {
+      lastOutflowDate = event.date;
     }
   }
 

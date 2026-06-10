@@ -615,7 +615,7 @@ export default function LakePage() {
                             {o.cumulative > 0 ? '' : '-'}{formatTWD(Math.abs(o.cumulative))}
                           </td>
                           <td style={{ textAlign: 'right', color: remaining < 0 ? 'var(--status-error)' : remaining < currentLakeBalance * 0.2 ? 'var(--status-warning)' : 'var(--status-success)', fontWeight: 600 }}>
-                            {formatTWD(Math.max(0, remaining))}
+                            {remaining < 0 ? `-${formatTWD(Math.abs(remaining))}` : formatTWD(remaining)}
                           </td>
                         </tr>
                       );
