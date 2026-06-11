@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap');
+/* 字體由 layout.tsx 透過 next/font/google self-host 載入，不使用外部 CDN */
 
 /* ============================================================
    Design Tokens — CSS Variables
@@ -66,9 +66,9 @@
   --shadow-lg:  0 8px 40px rgba(0,0,0,0.45);
   --shadow-lake: 0 0 40px var(--lake-glow);
 
-  /* Fonts */
-  --font-sans: 'Noto Sans TC', 'Inter', sans-serif;
-  --font-mono: 'Inter', monospace;
+  /* Fonts — 由 next/font/google 自動 self-host，CSS variables 由 layout.tsx 注入 */
+  --font-sans: var(--font-noto), var(--font-inter), 'Noto Sans TC', 'Inter', sans-serif;
+  --font-mono: var(--font-inter), 'Inter', monospace;
 
   /* Transitions */
   --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
