@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
 import { Lake, LakeExpense, LakeRequest, DryPrediction, IncomeItem, Transaction, ExpenseItem } from '@/types';
@@ -24,7 +24,7 @@ interface ConflictWarning {
 export default function LakePage() {
   const { profile, canManageLake } = useAuth();
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [lake, setLake]             = useState<Lake | null>(null);
   const [expenses, setExpenses]     = useState<LakeExpense[]>([]);

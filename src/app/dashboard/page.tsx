@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
@@ -26,7 +26,7 @@ interface MemberData {
 export default function DashboardPage() {
   const { profile } = useAuth();
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [lake, setLake]                 = useState<Lake | null>(null);
   const [members, setMembers]           = useState<MemberData[]>([]);

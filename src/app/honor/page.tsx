@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
 import { HonorLake, HonorExpense, Transaction, PondA, IncomeItem } from '@/types';
@@ -10,7 +10,7 @@ import { zhTW } from 'date-fns/locale';
 
 export default function HonorLakePage() {
   const { profile, isAdmin, canManageLake } = useAuth();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [honorLake, setHonorLake] = useState<HonorLake | null>(null);
   const [expenses, setExpenses] = useState<HonorExpense[]>([]);

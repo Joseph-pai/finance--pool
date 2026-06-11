@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
 import { ExpenseItem, Profile } from '@/types';
@@ -13,7 +13,7 @@ type ModalMode = 'add' | 'edit' | null;
 
 export default function ExpensesPage() {
   const { profile, isAdmin, canManageLake } = useAuth();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [items, setItems]       = useState<(ExpenseItem & { profile?: Profile })[]>([]);
   const [loading, setLoading]   = useState(true);
@@ -248,10 +248,45 @@ export default function ExpensesPage() {
     }
   };
 
-  /** 標記支出為「已完成」，觸發 fn_recalc_pond_b */
+  /** 標記支出為「已完成」
+   * - pond_a 來源：觸發器 fn_trigger_expense_changed → fn_recalc_pond_b 自動處理
+   * - lake 來源：需額外插入 type='lake_expense' 的 transaction，
+   *              才能讓 fn_recalc_lake 正確扣除湖泊餘額
+   */
   const handleComplete = async (item: ExpenseItem) => {
+    if (!profile?.family_id) return;
     setSaving(true);
-    await supabase.from('expense_items').update({ status: 'completed' }).eq('id', item.id);
+
+    // 1. 更新支出狀態為已完成
+    const { error } = await supabase
+      .from('expense_items')
+      .update({ status: 'completed' })
+      .eq('id', item.id);
+
+    if (error) {
+      console.error('handleComplete: update status failed', error);
+      setSaving(false);
+      return;
+    }
+
+    // 2. 若資金來源為湖泊，插入 lake_expense transaction 以觸發湖泊餘額重算
+    if (item.source === 'lake') {
+      const { error: txError } = await supabase.from('transactions').insert({
+        family_id: profile.family_id,
+        user_id: item.user_id,
+        type: 'lake_expense',
+        amount: item.amount,
+        source: 'lake',
+        destination: null,
+        reference_id: item.id,
+        note: item.name,
+        transaction_date: item.expected_date,
+      });
+      if (txError) {
+        console.error('handleComplete: insert lake_expense transaction failed', txError);
+      }
+    }
+
     setSaving(false);
     load();
   };

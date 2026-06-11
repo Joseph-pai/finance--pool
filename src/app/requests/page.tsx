@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
 import { LakeRequest, Profile } from '@/types';
@@ -11,7 +11,7 @@ import { LabelTooltip } from '@/components/ui/Tooltip';
 
 export default function RequestsPage() {
   const { profile, isAdmin, canManageLake } = useAuth();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [requests, setRequests] = useState<(LakeRequest & { profile?: Profile })[]>([]);
   const [loading, setLoading]   = useState(true);

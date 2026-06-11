@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
 import { Profile, UserRole } from '@/types';
@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 
 export default function SettingsPage() {
   const { profile, signOut, isAdmin } = useAuth();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
   const [members, setMembers]   = useState<Profile[]>([]);

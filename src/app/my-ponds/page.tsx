@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
 import { PondA, PondB, IncomeItem, ExpenseItem, Transaction, Profile } from '@/types';
@@ -13,7 +13,7 @@ import { LabelTooltip } from '@/components/ui/Tooltip';
 
 export default function MyPondsPage() {
   const { profile, isAdmin } = useAuth();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
   const [pondA, setPondA]               = useState<PondA | null>(null);

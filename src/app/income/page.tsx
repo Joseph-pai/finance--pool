@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/lib/supabase';
 import { IncomeItem, Profile, Transaction, HonorLake } from '@/types';
@@ -38,7 +38,7 @@ function calculatePendingLakeAmount(items: (IncomeItem & { profile?: Profile })[
 
 export default function IncomePage() {
   const { profile, isAdmin, canManageLake } = useAuth();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [items, setItems]         = useState<(IncomeItem & { profile?: Profile })[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
