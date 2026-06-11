@@ -1,20 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Noto_Sans_TC, Inter } from 'next/font/google';
 import './globals.css';
-
-const notoSansTC = Noto_Sans_TC({
-  subsets: ['latin'],
-  weight: ['300', '400', '500', '600', '700'],
-  variable: '--font-noto',
-  display: 'swap',
-});
-
-const inter = Inter({
-  subsets: ['latin'],
-  weight: ['300', '400', '500', '600', '700', '800'],
-  variable: '--font-inter',
-  display: 'swap',
-});
 
 export const metadata: Metadata = {
   title: 'FamilyPool — 家庭財務管理',
@@ -41,7 +26,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-TW" className={`${notoSansTC.variable} ${inter.variable}`}>
+    <html lang="zh-TW">
       <head>
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
